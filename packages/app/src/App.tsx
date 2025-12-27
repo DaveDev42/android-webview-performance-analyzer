@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 interface Device {
   id: string;
@@ -48,7 +49,20 @@ interface Session {
   status: "active" | "completed" | "aborted";
 }
 
+interface NetworkEvent {
+  type: "NetworkRequest" | "NetworkResponse" | "NetworkComplete";
+  request_id: string;
+  url?: string;
+  method?: string;
+  status?: number;
+  duration_ms?: number;
+  size_bytes?: number;
+  timestamp?: number;
+}
+
 type ConnectionState = "Disconnected" | "Connecting" | "Connected";
+
+const MAX_HISTORY_POINTS = 60;
 
 function formatBytes(bytes: number | null): string {
   if (bytes === null) return "-";
@@ -69,6 +83,27 @@ function formatDuration(ms: number): string {
     return `${minutes}m ${seconds % 60}s`;
   }
   return `${seconds}s`;
+}
+
+function MiniChart({ data, maxValue, color }: { data: number[]; maxValue: number; color: string }) {
+  const height = 40;
+  const width = 200;
+  const points = data.map((value, index) => {
+    const x = (index / (data.length - 1 || 1)) * width;
+    const y = height - (value / (maxValue || 1)) * height;
+    return `${x},${y}`;
+  }).join(" ");
+
+  return (
+    <svg width={width} height={height} className="opacity-50">
+      <polyline
+        fill="none"
+        stroke={color}
+        strokeWidth="1.5"
+        points={points}
+      />
+    </svg>
+  );
 }
 
 function App() {
@@ -93,6 +128,10 @@ function App() {
   const [currentSession, setCurrentSession] = useState<Session | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [showSessions, setShowSessions] = useState(false);
+
+  // Metrics History
+  const [metricsHistory, setMetricsHistory] = useState<PerformanceMetrics[]>([]);
+  const [networkRequests, setNetworkRequests] = useState<NetworkEvent[]>([]);
 
   const refreshDevices = useCallback(async () => {
     setLoading(true);
@@ -207,7 +246,6 @@ function App() {
 
   const disconnectCdp = async () => {
     try {
-      // End session if active
       if (currentSession) {
         await endSession();
       }
@@ -216,6 +254,8 @@ function App() {
       setSelectedTarget(null);
       setMetrics(null);
       setIsCollecting(false);
+      setMetricsHistory([]);
+      setNetworkRequests([]);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -229,12 +269,14 @@ function App() {
         params: {
           device_id: selectedDevice.id,
           device_name: selectedDevice.name,
-          package_name: null, // Could be extracted from webview
+          package_name: null,
           target_title: selectedTarget.title,
           webview_url: selectedTarget.url,
         },
       });
       setCurrentSession(session);
+      setMetricsHistory([]);
+      setNetworkRequests([]);
 
       // Start metrics collection
       await invoke("start_metrics_collection", { pollIntervalMs: 1000 });
@@ -249,11 +291,9 @@ function App() {
       if (currentSession) {
         await invoke("end_session", { sessionId: currentSession.id });
       }
-      // Stop metrics collection
       await invoke("stop_metrics_collection");
       setIsCollecting(false);
       setCurrentSession(null);
-      // Refresh sessions list
       await loadSessions();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -279,6 +319,39 @@ function App() {
     }
   };
 
+  // Setup Tauri event listeners
+  useEffect(() => {
+    let unlistenPerf: (() => void) | undefined;
+    let unlistenNetwork: (() => void) | undefined;
+
+    const setupListeners = async () => {
+      unlistenPerf = await listen<PerformanceMetrics>("metrics:performance", (event) => {
+        setMetrics(event.payload);
+        setMetricsHistory((prev) => {
+          const updated = [...prev, event.payload];
+          return updated.slice(-MAX_HISTORY_POINTS);
+        });
+      });
+
+      unlistenNetwork = await listen<NetworkEvent>("metrics:network", (event) => {
+        const netEvent = event.payload;
+        if (netEvent.type === "NetworkComplete") {
+          setNetworkRequests((prev) => {
+            const updated = [netEvent, ...prev];
+            return updated.slice(0, 50); // Keep last 50 requests
+          });
+        }
+      });
+    };
+
+    setupListeners();
+
+    return () => {
+      unlistenPerf?.();
+      unlistenNetwork?.();
+    };
+  }, []);
+
   useEffect(() => {
     refreshDevices();
     loadSessions();
@@ -290,6 +363,7 @@ function App() {
     }
   }, [selectedDevice, loadWebviews]);
 
+  // Fallback polling when not using events
   useEffect(() => {
     if (!isCollecting) return;
     const interval = setInterval(fetchMetrics, 1000);
@@ -299,6 +373,12 @@ function App() {
   const getPortForward = (socketName: string) => {
     return portForwards.find((pf) => pf.socketName === socketName);
   };
+
+  // Calculate chart data
+  const heapHistory = metricsHistory.map((m) => m.js_heap_used_size ?? 0);
+  const maxHeap = Math.max(...heapHistory, 1);
+  const nodeHistory = metricsHistory.map((m) => m.dom_nodes ?? 0);
+  const maxNodes = Math.max(...nodeHistory, 1);
 
   return (
     <div className="min-h-screen bg-gray-900 text-white">
@@ -684,6 +764,10 @@ function App() {
                         {new Date(currentSession.started_at).toLocaleTimeString()}
                       </span>
                     </div>
+                    <div className="flex items-center justify-between mt-1">
+                      <span className="text-gray-400">Data Points:</span>
+                      <span>{metricsHistory.length}</span>
+                    </div>
                   </div>
                 )}
 
@@ -697,17 +781,23 @@ function App() {
                         <p className="text-lg font-mono">
                           {formatBytes(metrics.js_heap_used_size)}
                         </p>
-                      </div>
-                      <div className="bg-gray-900 rounded p-3">
-                        <p className="text-gray-400">JS Heap Total</p>
-                        <p className="text-lg font-mono">
-                          {formatBytes(metrics.js_heap_total_size)}
-                        </p>
+                        {heapHistory.length > 1 && (
+                          <MiniChart data={heapHistory} maxValue={maxHeap} color="#3b82f6" />
+                        )}
                       </div>
                       <div className="bg-gray-900 rounded p-3">
                         <p className="text-gray-400">DOM Nodes</p>
                         <p className="text-lg font-mono">
                           {metrics.dom_nodes?.toLocaleString() ?? "-"}
+                        </p>
+                        {nodeHistory.length > 1 && (
+                          <MiniChart data={nodeHistory} maxValue={maxNodes} color="#22c55e" />
+                        )}
+                      </div>
+                      <div className="bg-gray-900 rounded p-3">
+                        <p className="text-gray-400">JS Heap Total</p>
+                        <p className="text-lg font-mono">
+                          {formatBytes(metrics.js_heap_total_size)}
                         </p>
                       </div>
                       <div className="bg-gray-900 rounded p-3">
@@ -737,6 +827,47 @@ function App() {
                       Last updated:{" "}
                       {new Date(metrics.timestamp).toLocaleTimeString()}
                     </p>
+                  </div>
+                )}
+
+                {/* Network Requests */}
+                {networkRequests.length > 0 && (
+                  <div className="bg-gray-800 rounded p-4">
+                    <h3 className="font-semibold mb-3">
+                      Network Requests
+                      <span className="text-sm font-normal text-gray-400 ml-2">
+                        ({networkRequests.length})
+                      </span>
+                    </h3>
+                    <div className="space-y-2 max-h-48 overflow-y-auto">
+                      {networkRequests.slice(0, 10).map((req) => (
+                        <div
+                          key={req.request_id}
+                          className="bg-gray-900 rounded p-2 text-xs"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span
+                              className={`px-1.5 py-0.5 rounded ${
+                                req.status && req.status >= 400
+                                  ? "bg-red-900 text-red-300"
+                                  : "bg-green-900 text-green-300"
+                              }`}
+                            >
+                              {req.status ?? "..."}
+                            </span>
+                            <span className="text-gray-400">
+                              {req.duration_ms?.toFixed(0)}ms
+                            </span>
+                            <span className="text-gray-400">
+                              {formatBytes(req.size_bytes ?? null)}
+                            </span>
+                          </div>
+                          <p className="text-gray-300 truncate mt-1">
+                            {req.method} {req.url}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>

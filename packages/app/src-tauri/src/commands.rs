@@ -107,12 +107,24 @@ pub async fn get_cdp_state(state: State<'_, Arc<AppState>>) -> Result<Connection
 
 #[tauri::command]
 pub async fn start_metrics_collection(
+    app: AppHandle,
     state: State<'_, Arc<AppState>>,
     poll_interval_ms: Option<u64>,
 ) -> Result<(), String> {
     let interval = poll_interval_ms.unwrap_or(1000);
 
-    let collector = MetricsCollector::new(state.cdp_client.clone());
+    // Get current session ID
+    let session_id = {
+        let current = state.current_session_id.read().await;
+        current.clone().ok_or("No active session. Create a session first.")?
+    };
+
+    let collector = MetricsCollector::new(
+        state.cdp_client.clone(),
+        state.database.clone(),
+        session_id,
+        Some(app),
+    );
     collector.start(interval).await.map_err(|e| e.to_string())?;
 
     let mut collector_lock = state.metrics_collector.write().await;
