@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { Session } from "../types";
+import type { Session, StoredMetric, StoredNetworkRequest } from "../types";
 
 interface ExportImportProps {
   session?: Session;
@@ -20,11 +20,11 @@ export function ExportDialog({ session, onClose }: ExportImportProps) {
     setError(null);
 
     try {
-      const metrics = await invoke<any[]>("get_session_metrics", {
+      const metrics = await invoke<StoredMetric[]>("get_session_metrics", {
         sessionId: session.id,
       });
 
-      const networkRequests = await invoke<any[]>("get_session_network_requests", {
+      const networkRequests = await invoke<StoredNetworkRequest[]>("get_session_network_requests", {
         sessionId: session.id,
       });
 
