@@ -1,5 +1,6 @@
 import type {
   Session,
+  SessionStatus,
   Metric,
   NetworkRequest,
   MetricType,
@@ -62,8 +63,8 @@ class MetricsDatabaseImpl implements MetricsDatabase {
     const id = crypto.randomUUID();
     this.db.run(
       `
-      INSERT INTO sessions (id, device_id, device_name, webview_url, package_name, started_at, ended_at, metadata)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO sessions (id, device_id, device_name, webview_url, package_name, target_title, started_at, ended_at, status, metadata)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
       [
         id,
@@ -71,8 +72,10 @@ class MetricsDatabaseImpl implements MetricsDatabase {
         session.deviceName,
         session.webviewUrl,
         session.packageName,
+        session.targetTitle,
         session.startedAt,
         session.endedAt,
+        session.status || "active",
         session.metadata ? JSON.stringify(session.metadata) : null,
       ]
     );
@@ -123,8 +126,8 @@ class MetricsDatabaseImpl implements MetricsDatabase {
   addNetworkRequest(request: NetworkRequest): void {
     this.db.run(
       `
-      INSERT INTO network_requests (id, session_id, url, method, status_code, request_time, response_time, size, headers)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO network_requests (id, session_id, url, method, status_code, request_time, response_time, duration_ms, size_bytes, headers)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
       [
         request.id,
@@ -134,7 +137,8 @@ class MetricsDatabaseImpl implements MetricsDatabase {
         request.statusCode,
         request.requestTime,
         request.responseTime,
-        request.size,
+        request.durationMs,
+        request.sizeBytes,
         request.headers ? JSON.stringify(request.headers) : null,
       ]
     );
@@ -142,7 +146,7 @@ class MetricsDatabaseImpl implements MetricsDatabase {
 
   getSession(id: string): Session | null {
     const stmt = this.db.prepare(`
-      SELECT id, device_id, device_name, webview_url, package_name, started_at, ended_at, metadata
+      SELECT id, device_id, device_name, webview_url, package_name, target_title, started_at, ended_at, status, metadata
       FROM sessions
       WHERE id = ?
     `);
@@ -162,15 +166,17 @@ class MetricsDatabaseImpl implements MetricsDatabase {
       deviceName: row[2] as string | null,
       webviewUrl: row[3] as string | null,
       packageName: row[4] as string | null,
-      startedAt: row[5] as number,
-      endedAt: row[6] as number | null,
-      metadata: row[7] ? JSON.parse(row[7] as string) : null,
+      targetTitle: row[5] as string | null,
+      startedAt: row[6] as number,
+      endedAt: row[7] as number | null,
+      status: (row[8] as SessionStatus) || "active",
+      metadata: row[9] ? JSON.parse(row[9] as string) : null,
     };
   }
 
   getSessions(): Session[] {
     const result = this.db.exec(`
-      SELECT id, device_id, device_name, webview_url, package_name, started_at, ended_at, metadata
+      SELECT id, device_id, device_name, webview_url, package_name, target_title, started_at, ended_at, status, metadata
       FROM sessions
       ORDER BY started_at DESC
     `);
@@ -185,9 +191,11 @@ class MetricsDatabaseImpl implements MetricsDatabase {
       deviceName: row[2] as string | null,
       webviewUrl: row[3] as string | null,
       packageName: row[4] as string | null,
-      startedAt: row[5] as number,
-      endedAt: row[6] as number | null,
-      metadata: row[7] ? JSON.parse(row[7] as string) : null,
+      targetTitle: row[5] as string | null,
+      startedAt: row[6] as number,
+      endedAt: row[7] as number | null,
+      status: (row[8] as SessionStatus) || "active",
+      metadata: row[9] ? JSON.parse(row[9] as string) : null,
     }));
   }
 
@@ -218,7 +226,7 @@ class MetricsDatabaseImpl implements MetricsDatabase {
 
   getNetworkRequests(sessionId: string): NetworkRequest[] {
     const stmt = this.db.prepare(`
-      SELECT id, session_id, url, method, status_code, request_time, response_time, size, headers
+      SELECT id, session_id, url, method, status_code, request_time, response_time, duration_ms, size_bytes, headers
       FROM network_requests
       WHERE session_id = ?
       ORDER BY request_time ASC
@@ -234,10 +242,11 @@ class MetricsDatabaseImpl implements MetricsDatabase {
         url: row[2] as string,
         method: row[3] as string | null,
         statusCode: row[4] as number | null,
-        requestTime: row[5] as number | null,
+        requestTime: row[5] as number,
         responseTime: row[6] as number | null,
-        size: row[7] as number | null,
-        headers: row[8] ? JSON.parse(row[8] as string) : null,
+        durationMs: row[7] as number | null,
+        sizeBytes: row[8] as number | null,
+        headers: row[9] ? JSON.parse(row[9] as string) : null,
       });
     }
     stmt.free();

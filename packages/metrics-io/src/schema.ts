@@ -8,8 +8,10 @@ CREATE TABLE IF NOT EXISTS sessions (
   device_name TEXT,
   webview_url TEXT,
   package_name TEXT,
+  target_title TEXT,
   started_at INTEGER NOT NULL,
   ended_at INTEGER,
+  status TEXT NOT NULL DEFAULT 'active',
   metadata TEXT
 );
 
@@ -35,14 +37,18 @@ CREATE TABLE IF NOT EXISTS network_requests (
   url TEXT NOT NULL,
   method TEXT,
   status_code INTEGER,
-  request_time INTEGER,
+  request_time INTEGER NOT NULL,
   response_time INTEGER,
-  size INTEGER,
+  duration_ms REAL,
+  size_bytes REAL,
   headers TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_network_session
   ON network_requests(session_id);
+
+CREATE INDEX IF NOT EXISTS idx_network_session_time
+  ON network_requests(session_id, request_time);
 
 -- Schema version table
 CREATE TABLE IF NOT EXISTS schema_version (

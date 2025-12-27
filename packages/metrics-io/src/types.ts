@@ -1,11 +1,15 @@
+export type SessionStatus = "active" | "completed" | "error";
+
 export interface Session {
   id: string;
   deviceId: string;
   deviceName: string | null;
   webviewUrl: string | null;
   packageName: string | null;
+  targetTitle: string | null;
   startedAt: number;
   endedAt: number | null;
+  status: SessionStatus;
   metadata: Record<string, unknown> | null;
 }
 
@@ -55,9 +59,10 @@ export interface NetworkRequest {
   url: string;
   method: string | null;
   statusCode: number | null;
-  requestTime: number | null;
+  requestTime: number;
   responseTime: number | null;
-  size: number | null;
+  durationMs: number | null;
+  sizeBytes: number | null;
   headers: Record<string, string> | null;
 }
 

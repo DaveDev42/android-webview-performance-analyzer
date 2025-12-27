@@ -1,5 +1,6 @@
 import type {
   Session,
+  SessionStatus,
   Metric,
   NetworkRequest,
   QueryOptions,
@@ -35,7 +36,7 @@ export class MetricsExporter {
     const db = await this.ensureInitialized();
     const result = db.exec(`
       SELECT id, device_id, device_name, webview_url, package_name,
-             started_at, ended_at, metadata
+             target_title, started_at, ended_at, status, metadata
       FROM sessions
       ORDER BY started_at DESC
     `);
@@ -50,9 +51,11 @@ export class MetricsExporter {
       deviceName: row[2] as string | null,
       webviewUrl: row[3] as string | null,
       packageName: row[4] as string | null,
-      startedAt: row[5] as number,
-      endedAt: row[6] as number | null,
-      metadata: row[7] ? JSON.parse(row[7] as string) : null,
+      targetTitle: row[5] as string | null,
+      startedAt: row[6] as number,
+      endedAt: row[7] as number | null,
+      status: (row[8] as SessionStatus) || "active",
+      metadata: row[9] ? JSON.parse(row[9] as string) : null,
     }));
   }
 
@@ -121,7 +124,7 @@ export class MetricsExporter {
 
     const stmt = db.prepare(`
       SELECT id, session_id, url, method, status_code,
-             request_time, response_time, size, headers
+             request_time, response_time, duration_ms, size_bytes, headers
       FROM network_requests
       WHERE session_id = ?
       ORDER BY request_time ASC
@@ -137,10 +140,11 @@ export class MetricsExporter {
         url: row[2] as string,
         method: row[3] as string | null,
         statusCode: row[4] as number | null,
-        requestTime: row[5] as number | null,
+        requestTime: row[5] as number,
         responseTime: row[6] as number | null,
-        size: row[7] as number | null,
-        headers: row[8] ? JSON.parse(row[8] as string) : null,
+        durationMs: row[7] as number | null,
+        sizeBytes: row[8] as number | null,
+        headers: row[9] ? JSON.parse(row[9] as string) : null,
       });
     }
     stmt.free();
