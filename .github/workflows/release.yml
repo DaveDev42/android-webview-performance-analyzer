@@ -1,0 +1,111 @@
+name: Production Release
+
+on:
+  push:
+    tags:
+      - 'release/v*'
+
+jobs:
+  extract-version:
+    name: Extract Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.extract.outputs.version }}
+    steps:
+      - name: Extract version from tag
+        id: extract
+        run: |
+          TAG_NAME="${{ github.ref_name }}"
+          VERSION="${TAG_NAME#release/v}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+  build-release:
+    name: Build Release (${{ matrix.settings.os }})
+    needs: extract-version
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            args: '--target aarch64-apple-darwin'
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            args: ''
+    runs-on: ${{ matrix.settings.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.settings.target }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './packages/app/src-tauri -> target'
+          cache-on-failure: true
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Update version for release
+        shell: bash
+        run: |
+          VERSION="${{ needs.extract-version.outputs.version }}"
+          # Update package.json files
+          node -e "const pkg=require('./package.json'); pkg.version='${VERSION}'; require('fs').writeFileSync('./package.json', JSON.stringify(pkg, null, 2))"
+          node -e "const pkg=require('./packages/app/package.json'); pkg.version='${VERSION}'; require('fs').writeFileSync('./packages/app/package.json', JSON.stringify(pkg, null, 2))"
+          # Update tauri.conf.json
+          node -e "const conf=require('./packages/app/src-tauri/tauri.conf.json'); conf.version='${VERSION}'; require('fs').writeFileSync('./packages/app/src-tauri/tauri.conf.json', JSON.stringify(conf, null, 2))"
+          # Update Cargo.toml
+          sed -i.bak 's/^version = ".*"/version = "'"${VERSION}"'"/' packages/app/src-tauri/Cargo.toml || true
+
+      - name: Set update endpoint for stable
+        shell: bash
+        run: |
+          node -e "
+            const conf = require('./packages/app/src-tauri/tauri.conf.json');
+            conf.plugins.updater.endpoints = ['https://github.com/DaveDev42/android-webview-performance-analyzer/releases/latest/download/latest.json'];
+            require('fs').writeFileSync('./packages/app/src-tauri/tauri.conf.json', JSON.stringify(conf, null, 2));
+          "
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: packages/app
+          tagName: v${{ needs.extract-version.outputs.version }}
+          releaseName: 'AWPA v${{ needs.extract-version.outputs.version }}'
+          releaseBody: |
+            ## AWPA v${{ needs.extract-version.outputs.version }}
+
+            ### Download
+            Choose the appropriate installer for your platform:
+            - **macOS (Apple Silicon)**: `.dmg` file for M1/M2/M3/M4 Macs
+            - **Windows**: `.msi` or `.exe` installer
+
+            ### Update Channel
+            This is a stable production release.
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.settings.args }}
+          updaterJsonPreferNsis: true

@@ -1,0 +1,113 @@
+name: Release Candidate
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: rc-${{ github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  build-rc:
+    name: Build RC (${{ matrix.settings.os }})
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            args: '--target aarch64-apple-darwin'
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            args: ''
+    runs-on: ${{ matrix.settings.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.settings.target }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './packages/app/src-tauri -> target'
+          cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Get RC version
+        id: version
+        shell: bash
+        run: |
+          BASE_VERSION=$(node -p "require('./package.json').version")
+          COMMIT_COUNT=$(git rev-list --count HEAD)
+          RC_VERSION="${BASE_VERSION}-rc.${COMMIT_COUNT}"
+          echo "version=${RC_VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Update version for RC
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          # Update package.json files
+          node -e "const pkg=require('./package.json'); pkg.version='${VERSION}'; require('fs').writeFileSync('./package.json', JSON.stringify(pkg, null, 2))"
+          node -e "const pkg=require('./packages/app/package.json'); pkg.version='${VERSION}'; require('fs').writeFileSync('./packages/app/package.json', JSON.stringify(pkg, null, 2))"
+          # Update tauri.conf.json
+          node -e "const conf=require('./packages/app/src-tauri/tauri.conf.json'); conf.version='${VERSION}'; require('fs').writeFileSync('./packages/app/src-tauri/tauri.conf.json', JSON.stringify(conf, null, 2))"
+          # Update Cargo.toml
+          sed -i.bak 's/^version = ".*"/version = "'"${VERSION}"'"/' packages/app/src-tauri/Cargo.toml || true
+
+      - name: Set update endpoint for RC
+        shell: bash
+        run: |
+          node -e "
+            const conf = require('./packages/app/src-tauri/tauri.conf.json');
+            conf.plugins.updater.endpoints = ['https://github.com/DaveDev42/android-webview-performance-analyzer/releases/download/v${{ steps.version.outputs.version }}/rc.json'];
+            require('fs').writeFileSync('./packages/app/src-tauri/tauri.conf.json', JSON.stringify(conf, null, 2));
+          "
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: packages/app
+          tagName: v${{ steps.version.outputs.version }}
+          releaseName: 'AWPA v${{ steps.version.outputs.version }} (Release Candidate)'
+          releaseBody: |
+            ## Release Candidate
+
+            This is an automated release candidate build from the main branch.
+
+            **Commit**: ${{ github.sha }}
+
+            > **Note**: This is a pre-release build. Use production releases for stable usage.
+
+            ### Update Channel
+            This build uses the `rc` update channel.
+          releaseDraft: false
+          prerelease: true
+          args: ${{ matrix.settings.args }}
+          updaterJsonPreferNsis: true

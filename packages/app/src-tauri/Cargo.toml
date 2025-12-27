@@ -17,6 +17,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["devtools"] }
 tauri-plugin-shell = "2"
+tauri-plugin-updater = "2"
 tauri-plugin-mcp = { git = "https://github.com/DaveDev42/tauri-plugin-mcp" }
 tokio = { version = "1", features = ["full"] }
 chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"] }

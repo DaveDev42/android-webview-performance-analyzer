@@ -2,11 +2,15 @@
   "name": "awpa",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "description": "Android WebView Performance Analyzer",
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
-    "tauri": "pnpm --filter @awpa/app tauri"
+    "tauri": "pnpm --filter @awpa/app tauri",
+    "lint": "eslint packages",
+    "typecheck": "turbo typecheck",
+    "test": "turbo test"
   },
   "keywords": [
     "android",
@@ -17,7 +21,12 @@
   ],
   "license": "MIT",
   "devDependencies": {
-    "turbo": "^2.3.3"
+    "@eslint/js": "^9.17.0",
+    "eslint": "^9.17.0",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "eslint-plugin-react-refresh": "^0.4.16",
+    "turbo": "^2.3.3",
+    "typescript-eslint": "^8.18.2"
   },
   "packageManager": "pnpm@9.15.1"
 }

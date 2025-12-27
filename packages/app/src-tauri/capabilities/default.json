@@ -6,6 +6,7 @@
   "permissions": [
     "core:default",
     "mcp:default",
+    "updater:default",
     "shell:allow-open",
     {
       "identifier": "shell:allow-execute",

@@ -1,0 +1,129 @@
+name: Preview Release
+
+on:
+  pull_request:
+    types: [labeled, synchronize, opened, reopened]
+
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check-label:
+    name: Check Preview Label
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.check.outputs.result }}
+    steps:
+      - name: Check for preview label
+        id: check
+        run: |
+          if [[ "${{ contains(github.event.pull_request.labels.*.name, 'preview') }}" == "true" ]]; then
+            echo "result=true" >> $GITHUB_OUTPUT
+          else
+            echo "result=false" >> $GITHUB_OUTPUT
+          fi
+
+  build-preview:
+    name: Build Preview (${{ matrix.settings.os }})
+    needs: check-label
+    if: needs.check-label.outputs.should_build == 'true'
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            args: '--target aarch64-apple-darwin'
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            args: ''
+    runs-on: ${{ matrix.settings.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.settings.target }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './packages/app/src-tauri -> target'
+          cache-on-failure: true
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate preview version
+        id: version
+        shell: bash
+        run: |
+          BASE_VERSION=$(node -p "require('./package.json').version")
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          RUN_NUMBER=${{ github.run_number }}
+          PREVIEW_VERSION="${BASE_VERSION}-preview.${PR_NUMBER}.${RUN_NUMBER}"
+          echo "version=${PREVIEW_VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Update version for preview
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          # Update package.json files
+          node -e "const pkg=require('./package.json'); pkg.version='${VERSION}'; require('fs').writeFileSync('./package.json', JSON.stringify(pkg, null, 2))"
+          node -e "const pkg=require('./packages/app/package.json'); pkg.version='${VERSION}'; require('fs').writeFileSync('./packages/app/package.json', JSON.stringify(pkg, null, 2))"
+          # Update tauri.conf.json
+          node -e "const conf=require('./packages/app/src-tauri/tauri.conf.json'); conf.version='${VERSION}'; require('fs').writeFileSync('./packages/app/src-tauri/tauri.conf.json', JSON.stringify(conf, null, 2))"
+          # Update Cargo.toml
+          sed -i.bak 's/^version = ".*"/version = "'"${VERSION}"'"/' packages/app/src-tauri/Cargo.toml || true
+
+      - name: Set update endpoint for preview
+        shell: bash
+        run: |
+          node -e "
+            const conf = require('./packages/app/src-tauri/tauri.conf.json');
+            conf.plugins.updater.endpoints = ['https://github.com/DaveDev42/android-webview-performance-analyzer/releases/download/v${{ steps.version.outputs.version }}/preview.json'];
+            require('fs').writeFileSync('./packages/app/src-tauri/tauri.conf.json', JSON.stringify(conf, null, 2));
+          "
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: packages/app
+          tagName: v${{ steps.version.outputs.version }}
+          releaseName: 'AWPA v${{ steps.version.outputs.version }} (Preview)'
+          releaseBody: |
+            ## Preview Release
+
+            This is a preview release from PR #${{ github.event.pull_request.number }}.
+
+            **PR Title**: ${{ github.event.pull_request.title }}
+            **Branch**: ${{ github.head_ref }}
+
+            > **Warning**: This is a pre-release build for testing purposes.
+
+            ### Update Channel
+            This build uses the `preview` update channel.
+          releaseDraft: false
+          prerelease: true
+          args: ${{ matrix.settings.args }}
+          updaterJsonPreferNsis: true
