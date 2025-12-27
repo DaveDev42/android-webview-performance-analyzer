@@ -36,6 +36,18 @@ interface PerformanceMetrics {
   task_duration: number | null;
 }
 
+interface Session {
+  id: string;
+  device_id: string;
+  device_name: string | null;
+  webview_url: string | null;
+  package_name: string | null;
+  target_title: string | null;
+  started_at: number;
+  ended_at: number | null;
+  status: "active" | "completed" | "aborted";
+}
+
 type ConnectionState = "Disconnected" | "Connecting" | "Connected";
 
 function formatBytes(bytes: number | null): string {
@@ -43,6 +55,20 @@ function formatBytes(bytes: number | null): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatDuration(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+
+  if (hours > 0) {
+    return `${hours}h ${minutes % 60}m`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${seconds % 60}s`;
+  }
+  return `${seconds}s`;
 }
 
 function App() {
@@ -62,6 +88,11 @@ function App() {
   const [activePort, setActivePort] = useState<number | null>(null);
   const [metrics, setMetrics] = useState<PerformanceMetrics | null>(null);
   const [isCollecting, setIsCollecting] = useState(false);
+
+  // Session State
+  const [currentSession, setCurrentSession] = useState<Session | null>(null);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [showSessions, setShowSessions] = useState(false);
 
   const refreshDevices = useCallback(async () => {
     setLoading(true);
@@ -94,6 +125,15 @@ function App() {
       setLoading(false);
     }
   }, []);
+
+  const loadSessions = async () => {
+    try {
+      const result = await invoke<Session[]>("list_sessions", { limit: 50 });
+      setSessions(result);
+    } catch (e) {
+      console.error("Failed to load sessions:", e);
+    }
+  };
 
   const startPortForward = async (webview: WebView) => {
     if (!selectedDevice) return;
@@ -128,7 +168,6 @@ function App() {
       setPortForwards((prev) =>
         prev.filter((p) => p.localPort !== pf.localPort)
       );
-      // Clear CDP state if this was the active port
       if (pf.localPort === activePort) {
         await disconnectCdp();
         setActivePort(null);
@@ -168,6 +207,10 @@ function App() {
 
   const disconnectCdp = async () => {
     try {
+      // End session if active
+      if (currentSession) {
+        await endSession();
+      }
       await invoke("disconnect_cdp");
       setConnectionState("Disconnected");
       setSelectedTarget(null);
@@ -178,8 +221,22 @@ function App() {
     }
   };
 
-  const startMetricsCollection = async () => {
+  const startSession = async () => {
+    if (!selectedDevice || !selectedTarget) return;
+
     try {
+      const session = await invoke<Session>("create_session", {
+        params: {
+          device_id: selectedDevice.id,
+          device_name: selectedDevice.name,
+          package_name: null, // Could be extracted from webview
+          target_title: selectedTarget.title,
+          webview_url: selectedTarget.url,
+        },
+      });
+      setCurrentSession(session);
+
+      // Start metrics collection
       await invoke("start_metrics_collection", { pollIntervalMs: 1000 });
       setIsCollecting(true);
     } catch (e) {
@@ -187,10 +244,26 @@ function App() {
     }
   };
 
-  const stopMetricsCollection = async () => {
+  const endSession = async () => {
     try {
+      if (currentSession) {
+        await invoke("end_session", { sessionId: currentSession.id });
+      }
+      // Stop metrics collection
       await invoke("stop_metrics_collection");
       setIsCollecting(false);
+      setCurrentSession(null);
+      // Refresh sessions list
+      await loadSessions();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const deleteSession = async (sessionId: string) => {
+    try {
+      await invoke("delete_session", { sessionId });
+      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -208,6 +281,7 @@ function App() {
 
   useEffect(() => {
     refreshDevices();
+    loadSessions();
   }, []);
 
   useEffect(() => {
@@ -216,7 +290,6 @@ function App() {
     }
   }, [selectedDevice, loadWebviews]);
 
-  // Poll metrics when collecting
   useEffect(() => {
     if (!isCollecting) return;
     const interval = setInterval(fetchMetrics, 1000);
@@ -229,11 +302,30 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-900 text-white">
-      <header className="border-b border-gray-700 px-6 py-4">
-        <h1 className="text-xl font-bold">AWPA</h1>
-        <p className="text-sm text-gray-400">
-          Android WebView Performance Analyzer
-        </p>
+      <header className="border-b border-gray-700 px-6 py-4 flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-bold">AWPA</h1>
+          <p className="text-sm text-gray-400">
+            Android WebView Performance Analyzer
+          </p>
+        </div>
+        <div className="flex items-center gap-4">
+          {currentSession && (
+            <div className="flex items-center gap-2 text-sm">
+              <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+              <span className="text-gray-300">Recording</span>
+            </div>
+          )}
+          <button
+            onClick={() => {
+              setShowSessions(!showSessions);
+              if (!showSessions) loadSessions();
+            }}
+            className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm"
+          >
+            Sessions ({sessions.length})
+          </button>
+        </div>
       </header>
 
       <main className="p-6">
@@ -247,6 +339,90 @@ function App() {
               Dismiss
             </button>
           </div>
+        )}
+
+        {/* Sessions Panel */}
+        {showSessions && (
+          <section className="mb-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold">Saved Sessions</h2>
+              <button
+                onClick={() => setShowSessions(false)}
+                className="text-gray-400 hover:text-white"
+              >
+                Close
+              </button>
+            </div>
+            {sessions.length === 0 ? (
+              <div className="bg-gray-800 rounded p-8 text-center">
+                <p className="text-gray-400">No saved sessions</p>
+                <p className="text-sm text-gray-500 mt-2">
+                  Start a recording session to capture metrics
+                </p>
+              </div>
+            ) : (
+              <div className="bg-gray-800 rounded overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-700">
+                      <th className="text-left p-3">Target</th>
+                      <th className="text-left p-3">Device</th>
+                      <th className="text-left p-3">Started</th>
+                      <th className="text-left p-3">Duration</th>
+                      <th className="text-left p-3">Status</th>
+                      <th className="text-right p-3">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sessions.map((session) => (
+                      <tr key={session.id} className="border-t border-gray-700">
+                        <td className="p-3">
+                          <p className="font-medium truncate max-w-xs">
+                            {session.target_title || "Untitled"}
+                          </p>
+                          <p className="text-xs text-gray-400 truncate max-w-xs">
+                            {session.webview_url}
+                          </p>
+                        </td>
+                        <td className="p-3 text-gray-400">
+                          {session.device_name || session.device_id}
+                        </td>
+                        <td className="p-3 text-gray-400">
+                          {new Date(session.started_at).toLocaleString()}
+                        </td>
+                        <td className="p-3 text-gray-400">
+                          {session.ended_at
+                            ? formatDuration(session.ended_at - session.started_at)
+                            : "-"}
+                        </td>
+                        <td className="p-3">
+                          <span
+                            className={`px-2 py-1 rounded text-xs ${
+                              session.status === "active"
+                                ? "bg-green-900 text-green-300"
+                                : session.status === "completed"
+                                ? "bg-blue-900 text-blue-300"
+                                : "bg-red-900 text-red-300"
+                            }`}
+                          >
+                            {session.status}
+                          </span>
+                        </td>
+                        <td className="p-3 text-right">
+                          <button
+                            onClick={() => deleteSession(session.id)}
+                            className="px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-sm"
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -428,11 +604,10 @@ function App() {
             {cdpTargets.length > 0 && connectionState === "Disconnected" && (
               <div className="space-y-2 mb-4">
                 {cdpTargets.map((target) => (
-                  <div
-                    key={target.id}
-                    className="bg-gray-800 rounded p-4"
-                  >
-                    <p className="font-medium truncate">{target.title || "Untitled"}</p>
+                  <div key={target.id} className="bg-gray-800 rounded p-4">
+                    <p className="font-medium truncate">
+                      {target.title || "Untitled"}
+                    </p>
                     <p className="text-sm text-gray-400 truncate">{target.url}</p>
                     <button
                       onClick={() => connectCdp(target)}
@@ -467,20 +642,23 @@ function App() {
                   </div>
                 </div>
 
+                {/* Session Controls */}
                 <div className="flex gap-2">
-                  {!isCollecting ? (
+                  {!currentSession ? (
                     <button
-                      onClick={startMetricsCollection}
-                      className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 rounded text-sm"
+                      onClick={startSession}
+                      className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 rounded text-sm flex items-center justify-center gap-2"
                     >
-                      Start Collecting
+                      <span className="w-2 h-2 bg-white rounded-full" />
+                      Start Recording
                     </button>
                   ) : (
                     <button
-                      onClick={stopMetricsCollection}
-                      className="flex-1 px-4 py-2 bg-yellow-600 hover:bg-yellow-700 rounded text-sm"
+                      onClick={endSession}
+                      className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 rounded text-sm flex items-center justify-center gap-2"
                     >
-                      Stop Collecting
+                      <span className="w-2 h-2 bg-white rounded-full animate-pulse" />
+                      Stop Recording
                     </button>
                   )}
                   <button
@@ -490,6 +668,24 @@ function App() {
                     Fetch Now
                   </button>
                 </div>
+
+                {/* Current Session Info */}
+                {currentSession && (
+                  <div className="bg-gray-800 rounded p-3 text-sm">
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-400">Session ID:</span>
+                      <span className="font-mono text-xs">
+                        {currentSession.id.slice(0, 8)}...
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between mt-1">
+                      <span className="text-gray-400">Started:</span>
+                      <span>
+                        {new Date(currentSession.started_at).toLocaleTimeString()}
+                      </span>
+                    </div>
+                  </div>
+                )}
 
                 {/* Performance Metrics Display */}
                 {metrics && (
