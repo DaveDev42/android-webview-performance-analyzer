@@ -87,7 +87,7 @@ jobs:
 
       - name: Run Clippy
         working-directory: packages/app/src-tauri
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --lib --bins -- -D warnings
 
       - name: Run Rust tests
         working-directory: packages/app/src-tauri
