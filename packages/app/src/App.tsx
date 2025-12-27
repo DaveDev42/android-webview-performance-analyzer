@@ -19,6 +19,32 @@ interface PortForward {
   localPort: number;
 }
 
+interface CdpTarget {
+  id: string;
+  title: string;
+  url: string;
+  websocket_debugger_url: string | null;
+}
+
+interface PerformanceMetrics {
+  timestamp: number;
+  js_heap_used_size: number | null;
+  js_heap_total_size: number | null;
+  dom_nodes: number | null;
+  layout_count: number | null;
+  script_duration: number | null;
+  task_duration: number | null;
+}
+
+type ConnectionState = "Disconnected" | "Connecting" | "Connected";
+
+function formatBytes(bytes: number | null): string {
+  if (bytes === null) return "-";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function App() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
@@ -28,13 +54,21 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [nextPort, setNextPort] = useState(9222);
 
+  // CDP State
+  const [cdpTargets, setCdpTargets] = useState<CdpTarget[]>([]);
+  const [connectionState, setConnectionState] =
+    useState<ConnectionState>("Disconnected");
+  const [selectedTarget, setSelectedTarget] = useState<CdpTarget | null>(null);
+  const [activePort, setActivePort] = useState<number | null>(null);
+  const [metrics, setMetrics] = useState<PerformanceMetrics | null>(null);
+  const [isCollecting, setIsCollecting] = useState(false);
+
   const refreshDevices = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const result = await invoke<Device[]>("get_devices");
       setDevices(result);
-      // If selected device is no longer connected, deselect it
       if (selectedDevice && !result.find((d) => d.id === selectedDevice.id)) {
         setSelectedDevice(null);
         setWebviews([]);
@@ -94,8 +128,81 @@ function App() {
       setPortForwards((prev) =>
         prev.filter((p) => p.localPort !== pf.localPort)
       );
+      // Clear CDP state if this was the active port
+      if (pf.localPort === activePort) {
+        await disconnectCdp();
+        setActivePort(null);
+        setCdpTargets([]);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const loadCdpTargets = async (port: number) => {
+    try {
+      const targets = await invoke<CdpTarget[]>("get_cdp_targets", { port });
+      setCdpTargets(targets);
+      setActivePort(port);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const connectCdp = async (target: CdpTarget) => {
+    if (!target.websocket_debugger_url) {
+      setError("No WebSocket URL available for this target");
+      return;
+    }
+
+    try {
+      setConnectionState("Connecting");
+      await invoke("connect_cdp", { wsUrl: target.websocket_debugger_url });
+      setConnectionState("Connected");
+      setSelectedTarget(target);
+    } catch (e) {
+      setConnectionState("Disconnected");
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const disconnectCdp = async () => {
+    try {
+      await invoke("disconnect_cdp");
+      setConnectionState("Disconnected");
+      setSelectedTarget(null);
+      setMetrics(null);
+      setIsCollecting(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const startMetricsCollection = async () => {
+    try {
+      await invoke("start_metrics_collection", { pollIntervalMs: 1000 });
+      setIsCollecting(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const stopMetricsCollection = async () => {
+    try {
+      await invoke("stop_metrics_collection");
+      setIsCollecting(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const fetchMetrics = async () => {
+    if (connectionState !== "Connected") return;
+    try {
+      const result = await invoke<PerformanceMetrics>("get_performance_metrics");
+      setMetrics(result);
+    } catch (e) {
+      console.error("Failed to fetch metrics:", e);
     }
   };
 
@@ -108,6 +215,13 @@ function App() {
       loadWebviews(selectedDevice.id);
     }
   }, [selectedDevice, loadWebviews]);
+
+  // Poll metrics when collecting
+  useEffect(() => {
+    if (!isCollecting) return;
+    const interval = setInterval(fetchMetrics, 1000);
+    return () => clearInterval(interval);
+  }, [isCollecting, connectionState]);
 
   const getPortForward = (socketName: string) => {
     return portForwards.find((pf) => pf.socketName === socketName);
@@ -135,7 +249,7 @@ function App() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Devices Section */}
           <section>
             <div className="flex items-center justify-between mb-4">
@@ -259,23 +373,178 @@ function App() {
                             onClick={() => startPortForward(webview)}
                             className="px-3 py-1 bg-green-600 hover:bg-green-700 rounded text-sm"
                           >
-                            Connect
+                            Forward
                           </button>
                         )}
                       </div>
                     </div>
                     {pf && (
-                      <div className="mt-2 text-sm text-gray-400">
-                        CDP available at{" "}
-                        <code className="bg-gray-700 px-1 rounded">
-                          http://localhost:{pf.localPort}
-                        </code>
+                      <div className="mt-2 flex items-center gap-2">
+                        <button
+                          onClick={() => loadCdpTargets(pf.localPort)}
+                          className="px-3 py-1 bg-purple-600 hover:bg-purple-700 rounded text-sm"
+                        >
+                          Load Targets
+                        </button>
+                        {activePort === pf.localPort && (
+                          <span className="text-xs text-purple-400">
+                            {cdpTargets.length} target(s)
+                          </span>
+                        )}
                       </div>
                     )}
                   </div>
                 );
               })}
             </div>
+          </section>
+
+          {/* CDP & Metrics Section */}
+          <section>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold">CDP Connection</h2>
+              <span
+                className={`px-2 py-1 rounded text-xs ${
+                  connectionState === "Connected"
+                    ? "bg-green-900 text-green-300"
+                    : connectionState === "Connecting"
+                    ? "bg-yellow-900 text-yellow-300"
+                    : "bg-gray-700 text-gray-400"
+                }`}
+              >
+                {connectionState}
+              </span>
+            </div>
+
+            {cdpTargets.length === 0 && (
+              <div className="bg-gray-800 rounded p-8 text-center">
+                <p className="text-gray-400">No CDP targets loaded</p>
+                <p className="text-sm text-gray-500 mt-2">
+                  Forward a port and click "Load Targets"
+                </p>
+              </div>
+            )}
+
+            {cdpTargets.length > 0 && connectionState === "Disconnected" && (
+              <div className="space-y-2 mb-4">
+                {cdpTargets.map((target) => (
+                  <div
+                    key={target.id}
+                    className="bg-gray-800 rounded p-4"
+                  >
+                    <p className="font-medium truncate">{target.title || "Untitled"}</p>
+                    <p className="text-sm text-gray-400 truncate">{target.url}</p>
+                    <button
+                      onClick={() => connectCdp(target)}
+                      disabled={!target.websocket_debugger_url}
+                      className="mt-2 px-3 py-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded text-sm"
+                    >
+                      Connect
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {connectionState === "Connected" && selectedTarget && (
+              <div className="space-y-4">
+                <div className="bg-gray-800 rounded p-4">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium truncate">
+                        {selectedTarget.title || "Untitled"}
+                      </p>
+                      <p className="text-sm text-gray-400 truncate">
+                        {selectedTarget.url}
+                      </p>
+                    </div>
+                    <button
+                      onClick={disconnectCdp}
+                      className="ml-4 px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-sm"
+                    >
+                      Disconnect
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  {!isCollecting ? (
+                    <button
+                      onClick={startMetricsCollection}
+                      className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 rounded text-sm"
+                    >
+                      Start Collecting
+                    </button>
+                  ) : (
+                    <button
+                      onClick={stopMetricsCollection}
+                      className="flex-1 px-4 py-2 bg-yellow-600 hover:bg-yellow-700 rounded text-sm"
+                    >
+                      Stop Collecting
+                    </button>
+                  )}
+                  <button
+                    onClick={fetchMetrics}
+                    className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm"
+                  >
+                    Fetch Now
+                  </button>
+                </div>
+
+                {/* Performance Metrics Display */}
+                {metrics && (
+                  <div className="bg-gray-800 rounded p-4">
+                    <h3 className="font-semibold mb-3">Performance Metrics</h3>
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div className="bg-gray-900 rounded p-3">
+                        <p className="text-gray-400">JS Heap Used</p>
+                        <p className="text-lg font-mono">
+                          {formatBytes(metrics.js_heap_used_size)}
+                        </p>
+                      </div>
+                      <div className="bg-gray-900 rounded p-3">
+                        <p className="text-gray-400">JS Heap Total</p>
+                        <p className="text-lg font-mono">
+                          {formatBytes(metrics.js_heap_total_size)}
+                        </p>
+                      </div>
+                      <div className="bg-gray-900 rounded p-3">
+                        <p className="text-gray-400">DOM Nodes</p>
+                        <p className="text-lg font-mono">
+                          {metrics.dom_nodes?.toLocaleString() ?? "-"}
+                        </p>
+                      </div>
+                      <div className="bg-gray-900 rounded p-3">
+                        <p className="text-gray-400">Layout Count</p>
+                        <p className="text-lg font-mono">
+                          {metrics.layout_count?.toLocaleString() ?? "-"}
+                        </p>
+                      </div>
+                      <div className="bg-gray-900 rounded p-3">
+                        <p className="text-gray-400">Script Duration</p>
+                        <p className="text-lg font-mono">
+                          {metrics.script_duration !== null
+                            ? `${(metrics.script_duration * 1000).toFixed(1)} ms`
+                            : "-"}
+                        </p>
+                      </div>
+                      <div className="bg-gray-900 rounded p-3">
+                        <p className="text-gray-400">Task Duration</p>
+                        <p className="text-lg font-mono">
+                          {metrics.task_duration !== null
+                            ? `${(metrics.task_duration * 1000).toFixed(1)} ms`
+                            : "-"}
+                        </p>
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-3">
+                      Last updated:{" "}
+                      {new Date(metrics.timestamp).toLocaleTimeString()}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
           </section>
         </div>
 
@@ -290,7 +559,7 @@ function App() {
                     <th className="text-left p-3">Local Port</th>
                     <th className="text-left p-3">Socket</th>
                     <th className="text-left p-3">Device</th>
-                    <th className="text-right p-3">Action</th>
+                    <th className="text-right p-3">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -302,12 +571,20 @@ function App() {
                       </td>
                       <td className="p-3 text-gray-400">{pf.deviceId}</td>
                       <td className="p-3 text-right">
-                        <button
-                          onClick={() => stopPortForward(pf)}
-                          className="px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-sm"
-                        >
-                          Stop
-                        </button>
+                        <div className="flex justify-end gap-2">
+                          <button
+                            onClick={() => loadCdpTargets(pf.localPort)}
+                            className="px-3 py-1 bg-purple-600 hover:bg-purple-700 rounded text-sm"
+                          >
+                            Targets
+                          </button>
+                          <button
+                            onClick={() => stopPortForward(pf)}
+                            className="px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-sm"
+                          >
+                            Stop
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
