@@ -20,7 +20,7 @@ export interface CdpTarget {
   id: string;
   title: string;
   url: string;
-  websocket_debugger_url: string | null;
+  webSocketDebuggerUrl: string | null;
 }
 
 export interface PerformanceMetrics {

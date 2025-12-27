@@ -142,13 +142,13 @@ function App() {
   };
 
   const connectCdp = async (target: CdpTarget) => {
-    if (!target.websocket_debugger_url) {
+    if (!target.webSocketDebuggerUrl) {
       setError("No WebSocket URL available for this target");
       return;
     }
     try {
       setConnectionState("Connecting");
-      await invoke("connect_cdp", { wsUrl: target.websocket_debugger_url });
+      await invoke("connect_cdp", { wsUrl: target.webSocketDebuggerUrl });
       setConnectionState("Connected");
       setSelectedTarget(target);
     } catch (e) {
@@ -591,7 +591,7 @@ function App() {
                     <p className="text-sm text-gray-400 truncate">{target.url}</p>
                     <button
                       onClick={() => connectCdp(target)}
-                      disabled={!target.websocket_debugger_url}
+                      disabled={!target.webSocketDebuggerUrl}
                       className="mt-2 px-3 py-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded text-sm"
                     >
                       Connect

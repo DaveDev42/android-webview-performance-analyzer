@@ -90,15 +90,13 @@ pub async fn list_webviews(app: &AppHandle, device_id: &str) -> Result<Vec<WebVi
     let mut seen_pids = std::collections::HashSet::new();
 
     for line in stdout.lines() {
-        if line.contains("webview_devtools_remote_") || line.contains("chrome_devtools_remote") {
-            // Extract socket name
-            if let Some(socket_name) = line.split_whitespace().last() {
-                let socket_name = socket_name.trim_start_matches('@');
+        if let Some(socket_name) = line.split_whitespace().last() {
+            let socket_name = socket_name.trim_start_matches('@');
 
-                // Extract PID from socket name
-                if let Some(pid_str) = socket_name.split('_').last() {
+            // Handle WebView sockets: webview_devtools_remote_<pid>
+            if socket_name.starts_with("webview_devtools_remote_") {
+                if let Some(pid_str) = socket_name.strip_prefix("webview_devtools_remote_") {
                     if let Ok(pid) = pid_str.parse::<u32>() {
-                        // Avoid duplicates
                         if seen_pids.insert(pid) {
                             webviews.push(WebView {
                                 socket_name: socket_name.to_string(),
@@ -109,13 +107,33 @@ pub async fn list_webviews(app: &AppHandle, device_id: &str) -> Result<Vec<WebVi
                     }
                 }
             }
+            // Handle Chrome socket: chrome_devtools_remote (no PID suffix)
+            else if socket_name == "chrome_devtools_remote" {
+                // Chrome uses a fixed socket name, use 0 as placeholder PID
+                // We'll get the actual PID from cmdline later
+                if !seen_pids.contains(&0) {
+                    seen_pids.insert(0);
+                    webviews.push(WebView {
+                        socket_name: socket_name.to_string(),
+                        pid: 0, // Will be resolved later
+                        package_name: Some("com.android.chrome".to_string()),
+                    });
+                }
+            }
         }
     }
 
     // Try to get package names for each PID
     for webview in &mut webviews {
-        if let Ok(pkg) = get_package_name(app, device_id, webview.pid).await {
-            webview.package_name = Some(pkg);
+        // For Chrome (pid=0), try to get actual PID
+        if webview.pid == 0 && webview.package_name == Some("com.android.chrome".to_string()) {
+            if let Ok(pid) = get_pid_for_package(app, device_id, "com.android.chrome").await {
+                webview.pid = pid;
+            }
+        } else if webview.package_name.is_none() {
+            if let Ok(pkg) = get_package_name(app, device_id, webview.pid).await {
+                webview.package_name = Some(pkg);
+            }
         }
     }
 
@@ -147,6 +165,29 @@ async fn get_package_name(app: &AppHandle, device_id: &str, pid: u32) -> Result<
     }
 
     Err(AdbError::CommandFailed("Could not get package name".into()))
+}
+
+async fn get_pid_for_package(app: &AppHandle, device_id: &str, package: &str) -> Result<u32, AdbError> {
+    let output = app
+        .shell()
+        .sidecar("adb")
+        .map_err(|e| AdbError::ExecutionFailed(e.to_string()))?
+        .args(["-s", device_id, "shell", "pidof", package])
+        .output()
+        .await
+        .map_err(|e| AdbError::ExecutionFailed(e.to_string()))?;
+
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        // pidof may return multiple PIDs, get the first one
+        if let Some(pid_str) = stdout.split_whitespace().next() {
+            if let Ok(pid) = pid_str.parse::<u32>() {
+                return Ok(pid);
+            }
+        }
+    }
+
+    Err(AdbError::CommandFailed("Could not get PID".into()))
 }
 
 pub async fn forward_port(
