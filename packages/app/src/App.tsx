@@ -1,112 +1,31 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-
-interface Device {
-  id: string;
-  name: string;
-  status: string;
-}
-
-interface WebView {
-  socket_name: string;
-  pid: number;
-  package_name: string | null;
-}
-
-interface PortForward {
-  deviceId: string;
-  socketName: string;
-  localPort: number;
-}
-
-interface CdpTarget {
-  id: string;
-  title: string;
-  url: string;
-  websocket_debugger_url: string | null;
-}
-
-interface PerformanceMetrics {
-  timestamp: number;
-  js_heap_used_size: number | null;
-  js_heap_total_size: number | null;
-  dom_nodes: number | null;
-  layout_count: number | null;
-  script_duration: number | null;
-  task_duration: number | null;
-}
-
-interface Session {
-  id: string;
-  device_id: string;
-  device_name: string | null;
-  webview_url: string | null;
-  package_name: string | null;
-  target_title: string | null;
-  started_at: number;
-  ended_at: number | null;
-  status: "active" | "completed" | "aborted";
-}
-
-interface NetworkEvent {
-  type: "NetworkRequest" | "NetworkResponse" | "NetworkComplete";
-  request_id: string;
-  url?: string;
-  method?: string;
-  status?: number;
-  duration_ms?: number;
-  size_bytes?: number;
-  timestamp?: number;
-}
-
-type ConnectionState = "Disconnected" | "Connecting" | "Connected";
+import {
+  MetricsChart,
+  DomNodesChart,
+  MiniChart,
+  NetworkRequests,
+  SessionDetail,
+  ExportDialog,
+  ImportDialog,
+} from "./components";
+import { formatBytes, formatDuration } from "./utils";
+import type {
+  Device,
+  WebView,
+  PortForward,
+  CdpTarget,
+  PerformanceMetrics,
+  Session,
+  NetworkEvent,
+  ConnectionState,
+} from "./types";
 
 const MAX_HISTORY_POINTS = 60;
 
-function formatBytes(bytes: number | null): string {
-  if (bytes === null) return "-";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatDuration(ms: number): string {
-  const seconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-
-  if (hours > 0) {
-    return `${hours}h ${minutes % 60}m`;
-  }
-  if (minutes > 0) {
-    return `${minutes}m ${seconds % 60}s`;
-  }
-  return `${seconds}s`;
-}
-
-function MiniChart({ data, maxValue, color }: { data: number[]; maxValue: number; color: string }) {
-  const height = 40;
-  const width = 200;
-  const points = data.map((value, index) => {
-    const x = (index / (data.length - 1 || 1)) * width;
-    const y = height - (value / (maxValue || 1)) * height;
-    return `${x},${y}`;
-  }).join(" ");
-
-  return (
-    <svg width={width} height={height} className="opacity-50">
-      <polyline
-        fill="none"
-        stroke={color}
-        strokeWidth="1.5"
-        points={points}
-      />
-    </svg>
-  );
-}
-
 function App() {
+  // Device State
   const [devices, setDevices] = useState<Device[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
   const [webviews, setWebviews] = useState<WebView[]>([]);
@@ -117,8 +36,7 @@ function App() {
 
   // CDP State
   const [cdpTargets, setCdpTargets] = useState<CdpTarget[]>([]);
-  const [connectionState, setConnectionState] =
-    useState<ConnectionState>("Disconnected");
+  const [connectionState, setConnectionState] = useState<ConnectionState>("Disconnected");
   const [selectedTarget, setSelectedTarget] = useState<CdpTarget | null>(null);
   const [activePort, setActivePort] = useState<number | null>(null);
   const [metrics, setMetrics] = useState<PerformanceMetrics | null>(null);
@@ -128,10 +46,18 @@ function App() {
   const [currentSession, setCurrentSession] = useState<Session | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [showSessions, setShowSessions] = useState(false);
+  const [selectedSessionForView, setSelectedSessionForView] = useState<Session | null>(null);
 
   // Metrics History
   const [metricsHistory, setMetricsHistory] = useState<PerformanceMetrics[]>([]);
   const [networkRequests, setNetworkRequests] = useState<NetworkEvent[]>([]);
+
+  // Export/Import dialogs
+  const [exportSession, setExportSession] = useState<Session | null>(null);
+  const [showImport, setShowImport] = useState(false);
+
+  // Chart view toggle
+  const [showDetailedCharts, setShowDetailedCharts] = useState(false);
 
   const refreshDevices = useCallback(async () => {
     setLoading(true);
@@ -154,9 +80,7 @@ function App() {
     setLoading(true);
     setError(null);
     try {
-      const result = await invoke<WebView[]>("get_webviews", {
-        deviceId,
-      });
+      const result = await invoke<WebView[]>("get_webviews", { deviceId });
       setWebviews(result);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -176,7 +100,6 @@ function App() {
 
   const startPortForward = async (webview: WebView) => {
     if (!selectedDevice) return;
-
     try {
       const port = nextPort;
       await invoke("start_port_forward", {
@@ -186,11 +109,7 @@ function App() {
       });
       setPortForwards((prev) => [
         ...prev,
-        {
-          deviceId: selectedDevice.id,
-          socketName: webview.socket_name,
-          localPort: port,
-        },
+        { deviceId: selectedDevice.id, socketName: webview.socket_name, localPort: port },
       ]);
       setNextPort((p) => p + 1);
     } catch (e) {
@@ -200,13 +119,8 @@ function App() {
 
   const stopPortForward = async (pf: PortForward) => {
     try {
-      await invoke("stop_port_forward", {
-        deviceId: pf.deviceId,
-        localPort: pf.localPort,
-      });
-      setPortForwards((prev) =>
-        prev.filter((p) => p.localPort !== pf.localPort)
-      );
+      await invoke("stop_port_forward", { deviceId: pf.deviceId, localPort: pf.localPort });
+      setPortForwards((prev) => prev.filter((p) => p.localPort !== pf.localPort));
       if (pf.localPort === activePort) {
         await disconnectCdp();
         setActivePort(null);
@@ -232,7 +146,6 @@ function App() {
       setError("No WebSocket URL available for this target");
       return;
     }
-
     try {
       setConnectionState("Connecting");
       await invoke("connect_cdp", { wsUrl: target.websocket_debugger_url });
@@ -263,7 +176,6 @@ function App() {
 
   const startSession = async () => {
     if (!selectedDevice || !selectedTarget) return;
-
     try {
       const session = await invoke<Session>("create_session", {
         params: {
@@ -277,8 +189,6 @@ function App() {
       setCurrentSession(session);
       setMetricsHistory([]);
       setNetworkRequests([]);
-
-      // Start metrics collection
       await invoke("start_metrics_collection", { pollIntervalMs: 1000 });
       setIsCollecting(true);
     } catch (e) {
@@ -327,25 +237,17 @@ function App() {
     const setupListeners = async () => {
       unlistenPerf = await listen<PerformanceMetrics>("metrics:performance", (event) => {
         setMetrics(event.payload);
-        setMetricsHistory((prev) => {
-          const updated = [...prev, event.payload];
-          return updated.slice(-MAX_HISTORY_POINTS);
-        });
+        setMetricsHistory((prev) => [...prev, event.payload].slice(-MAX_HISTORY_POINTS));
       });
 
       unlistenNetwork = await listen<NetworkEvent>("metrics:network", (event) => {
-        const netEvent = event.payload;
-        if (netEvent.type === "NetworkComplete") {
-          setNetworkRequests((prev) => {
-            const updated = [netEvent, ...prev];
-            return updated.slice(0, 50); // Keep last 50 requests
-          });
+        if (event.payload.type === "NetworkComplete") {
+          setNetworkRequests((prev) => [event.payload, ...prev].slice(0, 50));
         }
       });
     };
 
     setupListeners();
-
     return () => {
       unlistenPerf?.();
       unlistenNetwork?.();
@@ -363,16 +265,14 @@ function App() {
     }
   }, [selectedDevice, loadWebviews]);
 
-  // Fallback polling when not using events
   useEffect(() => {
     if (!isCollecting) return;
     const interval = setInterval(fetchMetrics, 1000);
     return () => clearInterval(interval);
   }, [isCollecting, connectionState]);
 
-  const getPortForward = (socketName: string) => {
-    return portForwards.find((pf) => pf.socketName === socketName);
-  };
+  const getPortForward = (socketName: string) =>
+    portForwards.find((pf) => pf.socketName === socketName);
 
   // Calculate chart data
   const heapHistory = metricsHistory.map((m) => m.js_heap_used_size ?? 0);
@@ -382,12 +282,11 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-900 text-white">
+      {/* Header */}
       <header className="border-b border-gray-700 px-6 py-4 flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold">AWPA</h1>
-          <p className="text-sm text-gray-400">
-            Android WebView Performance Analyzer
-          </p>
+          <p className="text-sm text-gray-400">Android WebView Performance Analyzer</p>
         </div>
         <div className="flex items-center gap-4">
           {currentSession && (
@@ -397,11 +296,17 @@ function App() {
             </div>
           )}
           <button
+            onClick={() => setShowImport(true)}
+            className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm"
+          >
+            Import
+          </button>
+          <button
             onClick={() => {
               setShowSessions(!showSessions);
               if (!showSessions) loadSessions();
             }}
-            className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm"
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-sm"
           >
             Sessions ({sessions.length})
           </button>
@@ -409,13 +314,11 @@ function App() {
       </header>
 
       <main className="p-6">
+        {/* Error Display */}
         {error && (
           <div className="bg-red-900/50 border border-red-700 rounded p-4 mb-4">
             <p className="text-red-300">{error}</p>
-            <button
-              onClick={() => setError(null)}
-              className="text-sm text-red-400 hover:text-red-300 mt-2"
-            >
+            <button onClick={() => setError(null)} className="text-sm text-red-400 hover:text-red-300 mt-2">
               Dismiss
             </button>
           </div>
@@ -426,19 +329,14 @@ function App() {
           <section className="mb-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold">Saved Sessions</h2>
-              <button
-                onClick={() => setShowSessions(false)}
-                className="text-gray-400 hover:text-white"
-              >
+              <button onClick={() => setShowSessions(false)} className="text-gray-400 hover:text-white">
                 Close
               </button>
             </div>
             {sessions.length === 0 ? (
               <div className="bg-gray-800 rounded p-8 text-center">
                 <p className="text-gray-400">No saved sessions</p>
-                <p className="text-sm text-gray-500 mt-2">
-                  Start a recording session to capture metrics
-                </p>
+                <p className="text-sm text-gray-500 mt-2">Start a recording session to capture metrics</p>
               </div>
             ) : (
               <div className="bg-gray-800 rounded overflow-hidden">
@@ -455,14 +353,19 @@ function App() {
                   </thead>
                   <tbody>
                     {sessions.map((session) => (
-                      <tr key={session.id} className="border-t border-gray-700">
+                      <tr key={session.id} className="border-t border-gray-700 hover:bg-gray-700/50">
                         <td className="p-3">
-                          <p className="font-medium truncate max-w-xs">
-                            {session.target_title || "Untitled"}
-                          </p>
-                          <p className="text-xs text-gray-400 truncate max-w-xs">
-                            {session.webview_url}
-                          </p>
+                          <button
+                            onClick={() => setSelectedSessionForView(session)}
+                            className="text-left hover:text-blue-400"
+                          >
+                            <p className="font-medium truncate max-w-xs">
+                              {session.target_title || "Untitled"}
+                            </p>
+                            <p className="text-xs text-gray-400 truncate max-w-xs">
+                              {session.webview_url}
+                            </p>
+                          </button>
                         </td>
                         <td className="p-3 text-gray-400">
                           {session.device_name || session.device_id}
@@ -471,9 +374,7 @@ function App() {
                           {new Date(session.started_at).toLocaleString()}
                         </td>
                         <td className="p-3 text-gray-400">
-                          {session.ended_at
-                            ? formatDuration(session.ended_at - session.started_at)
-                            : "-"}
+                          {session.ended_at ? formatDuration(session.ended_at - session.started_at) : "-"}
                         </td>
                         <td className="p-3">
                           <span
@@ -489,12 +390,28 @@ function App() {
                           </span>
                         </td>
                         <td className="p-3 text-right">
-                          <button
-                            onClick={() => deleteSession(session.id)}
-                            className="px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-sm"
-                          >
-                            Delete
-                          </button>
+                          <div className="flex justify-end gap-2">
+                            <button
+                              onClick={() => setSelectedSessionForView(session)}
+                              className="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-sm"
+                            >
+                              View
+                            </button>
+                            <button
+                              onClick={() => setExportSession(session)}
+                              className="px-3 py-1 bg-gray-600 hover:bg-gray-500 rounded text-sm"
+                            >
+                              Export
+                            </button>
+                            <button
+                              onClick={() => {
+                                if (confirm("Delete this session?")) deleteSession(session.id);
+                              }}
+                              className="px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-sm"
+                            >
+                              Delete
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -534,9 +451,7 @@ function App() {
                   key={device.id}
                   onClick={() => setSelectedDevice(device)}
                   className={`w-full text-left bg-gray-800 rounded p-4 flex items-center justify-between transition-colors ${
-                    selectedDevice?.id === device.id
-                      ? "ring-2 ring-blue-500"
-                      : "hover:bg-gray-750"
+                    selectedDevice?.id === device.id ? "ring-2 ring-blue-500" : "hover:bg-gray-750"
                   }`}
                 >
                   <div>
@@ -563,9 +478,7 @@ function App() {
               <h2 className="text-lg font-semibold">
                 WebViews
                 {selectedDevice && (
-                  <span className="text-sm font-normal text-gray-400 ml-2">
-                    on {selectedDevice.name}
-                  </span>
+                  <span className="text-sm font-normal text-gray-400 ml-2">on {selectedDevice.name}</span>
                 )}
               </h2>
               {selectedDevice && (
@@ -598,25 +511,18 @@ function App() {
               {webviews.map((webview) => {
                 const pf = getPortForward(webview.socket_name);
                 return (
-                  <div
-                    key={webview.socket_name}
-                    className="bg-gray-800 rounded p-4"
-                  >
+                  <div key={webview.socket_name} className="bg-gray-800 rounded p-4">
                     <div className="flex items-start justify-between">
                       <div className="flex-1 min-w-0">
                         <p className="font-medium truncate">
                           {webview.package_name || `PID ${webview.pid}`}
                         </p>
-                        <p className="text-sm text-gray-400 truncate">
-                          {webview.socket_name}
-                        </p>
+                        <p className="text-sm text-gray-400 truncate">{webview.socket_name}</p>
                       </div>
                       <div className="ml-4">
                         {pf ? (
                           <div className="flex items-center gap-2">
-                            <span className="text-sm text-green-400">
-                              :{pf.localPort}
-                            </span>
+                            <span className="text-sm text-green-400">:{pf.localPort}</span>
                             <button
                               onClick={() => stopPortForward(pf)}
                               className="px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-sm"
@@ -643,9 +549,7 @@ function App() {
                           Load Targets
                         </button>
                         {activePort === pf.localPort && (
-                          <span className="text-xs text-purple-400">
-                            {cdpTargets.length} target(s)
-                          </span>
+                          <span className="text-xs text-purple-400">{cdpTargets.length} target(s)</span>
                         )}
                       </div>
                     )}
@@ -675,9 +579,7 @@ function App() {
             {cdpTargets.length === 0 && (
               <div className="bg-gray-800 rounded p-8 text-center">
                 <p className="text-gray-400">No CDP targets loaded</p>
-                <p className="text-sm text-gray-500 mt-2">
-                  Forward a port and click "Load Targets"
-                </p>
+                <p className="text-sm text-gray-500 mt-2">Forward a port and click "Load Targets"</p>
               </div>
             )}
 
@@ -685,9 +587,7 @@ function App() {
               <div className="space-y-2 mb-4">
                 {cdpTargets.map((target) => (
                   <div key={target.id} className="bg-gray-800 rounded p-4">
-                    <p className="font-medium truncate">
-                      {target.title || "Untitled"}
-                    </p>
+                    <p className="font-medium truncate">{target.title || "Untitled"}</p>
                     <p className="text-sm text-gray-400 truncate">{target.url}</p>
                     <button
                       onClick={() => connectCdp(target)}
@@ -706,12 +606,8 @@ function App() {
                 <div className="bg-gray-800 rounded p-4">
                   <div className="flex items-start justify-between">
                     <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate">
-                        {selectedTarget.title || "Untitled"}
-                      </p>
-                      <p className="text-sm text-gray-400 truncate">
-                        {selectedTarget.url}
-                      </p>
+                      <p className="font-medium truncate">{selectedTarget.title || "Untitled"}</p>
+                      <p className="text-sm text-gray-400 truncate">{selectedTarget.url}</p>
                     </div>
                     <button
                       onClick={disconnectCdp}
@@ -754,15 +650,11 @@ function App() {
                   <div className="bg-gray-800 rounded p-3 text-sm">
                     <div className="flex items-center justify-between">
                       <span className="text-gray-400">Session ID:</span>
-                      <span className="font-mono text-xs">
-                        {currentSession.id.slice(0, 8)}...
-                      </span>
+                      <span className="font-mono text-xs">{currentSession.id.slice(0, 8)}...</span>
                     </div>
                     <div className="flex items-center justify-between mt-1">
                       <span className="text-gray-400">Started:</span>
-                      <span>
-                        {new Date(currentSession.started_at).toLocaleTimeString()}
-                      </span>
+                      <span>{new Date(currentSession.started_at).toLocaleTimeString()}</span>
                     </div>
                     <div className="flex items-center justify-between mt-1">
                       <span className="text-gray-400">Data Points:</span>
@@ -774,13 +666,19 @@ function App() {
                 {/* Performance Metrics Display */}
                 {metrics && (
                   <div className="bg-gray-800 rounded p-4">
-                    <h3 className="font-semibold mb-3">Performance Metrics</h3>
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="font-semibold">Performance Metrics</h3>
+                      <button
+                        onClick={() => setShowDetailedCharts(!showDetailedCharts)}
+                        className="text-xs text-blue-400 hover:text-blue-300"
+                      >
+                        {showDetailedCharts ? "Hide Charts" : "Show Charts"}
+                      </button>
+                    </div>
                     <div className="grid grid-cols-2 gap-3 text-sm">
                       <div className="bg-gray-900 rounded p-3">
                         <p className="text-gray-400">JS Heap Used</p>
-                        <p className="text-lg font-mono">
-                          {formatBytes(metrics.js_heap_used_size)}
-                        </p>
+                        <p className="text-lg font-mono">{formatBytes(metrics.js_heap_used_size)}</p>
                         {heapHistory.length > 1 && (
                           <MiniChart data={heapHistory} maxValue={maxHeap} color="#3b82f6" />
                         )}
@@ -796,9 +694,7 @@ function App() {
                       </div>
                       <div className="bg-gray-900 rounded p-3">
                         <p className="text-gray-400">JS Heap Total</p>
-                        <p className="text-lg font-mono">
-                          {formatBytes(metrics.js_heap_total_size)}
-                        </p>
+                        <p className="text-lg font-mono">{formatBytes(metrics.js_heap_total_size)}</p>
                       </div>
                       <div className="bg-gray-900 rounded p-3">
                         <p className="text-gray-400">Layout Count</p>
@@ -824,52 +720,21 @@ function App() {
                       </div>
                     </div>
                     <p className="text-xs text-gray-500 mt-3">
-                      Last updated:{" "}
-                      {new Date(metrics.timestamp).toLocaleTimeString()}
+                      Last updated: {new Date(metrics.timestamp).toLocaleTimeString()}
                     </p>
                   </div>
                 )}
 
-                {/* Network Requests */}
-                {networkRequests.length > 0 && (
-                  <div className="bg-gray-800 rounded p-4">
-                    <h3 className="font-semibold mb-3">
-                      Network Requests
-                      <span className="text-sm font-normal text-gray-400 ml-2">
-                        ({networkRequests.length})
-                      </span>
-                    </h3>
-                    <div className="space-y-2 max-h-48 overflow-y-auto">
-                      {networkRequests.slice(0, 10).map((req) => (
-                        <div
-                          key={req.request_id}
-                          className="bg-gray-900 rounded p-2 text-xs"
-                        >
-                          <div className="flex items-center justify-between">
-                            <span
-                              className={`px-1.5 py-0.5 rounded ${
-                                req.status && req.status >= 400
-                                  ? "bg-red-900 text-red-300"
-                                  : "bg-green-900 text-green-300"
-                              }`}
-                            >
-                              {req.status ?? "..."}
-                            </span>
-                            <span className="text-gray-400">
-                              {req.duration_ms?.toFixed(0)}ms
-                            </span>
-                            <span className="text-gray-400">
-                              {formatBytes(req.size_bytes ?? null)}
-                            </span>
-                          </div>
-                          <p className="text-gray-300 truncate mt-1">
-                            {req.method} {req.url}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
+                {/* Detailed Charts */}
+                {showDetailedCharts && metricsHistory.length > 1 && (
+                  <div className="space-y-4">
+                    <MetricsChart data={metricsHistory} height={200} />
+                    <DomNodesChart data={metricsHistory} height={150} />
                   </div>
                 )}
+
+                {/* Network Requests */}
+                <NetworkRequests requests={networkRequests} maxDisplay={10} />
               </div>
             )}
           </section>
@@ -893,9 +758,7 @@ function App() {
                   {portForwards.map((pf) => (
                     <tr key={pf.localPort} className="border-t border-gray-700">
                       <td className="p-3 font-mono">{pf.localPort}</td>
-                      <td className="p-3 text-gray-400 truncate max-w-xs">
-                        {pf.socketName}
-                      </td>
+                      <td className="p-3 text-gray-400 truncate max-w-xs">{pf.socketName}</td>
                       <td className="p-3 text-gray-400">{pf.deviceId}</td>
                       <td className="p-3 text-right">
                         <div className="flex justify-end gap-2">
@@ -921,6 +784,35 @@ function App() {
           </section>
         )}
       </main>
+
+      {/* Session Detail Modal */}
+      {selectedSessionForView && (
+        <SessionDetail
+          session={selectedSessionForView}
+          onClose={() => setSelectedSessionForView(null)}
+          onDelete={deleteSession}
+          onExport={(s) => {
+            setSelectedSessionForView(null);
+            setExportSession(s);
+          }}
+        />
+      )}
+
+      {/* Export Dialog */}
+      {exportSession && (
+        <ExportDialog
+          session={exportSession}
+          onClose={() => setExportSession(null)}
+        />
+      )}
+
+      {/* Import Dialog */}
+      {showImport && (
+        <ImportDialog
+          onClose={() => setShowImport(false)}
+          onImportComplete={loadSessions}
+        />
+      )}
     </div>
   );
 }
