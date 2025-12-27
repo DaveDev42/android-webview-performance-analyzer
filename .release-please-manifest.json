@@ -1,0 +1,5 @@
+{
+  ".": "0.0.2",
+  "packages/app": "0.0.2",
+  "packages/metrics-io": "0.0.2"
+}

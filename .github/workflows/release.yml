@@ -3,7 +3,9 @@ name: Production Release
 on:
   push:
     tags:
-      - 'release/v*'
+      - 'v*'
+      - '!v*-rc.*'
+      - '!v*-preview.*'
 
 jobs:
   extract-version:
@@ -16,7 +18,7 @@ jobs:
         id: extract
         run: |
           TAG_NAME="${{ github.ref_name }}"
-          VERSION="${TAG_NAME#release/v}"
+          VERSION="${TAG_NAME#v}"
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
   build-release:
@@ -82,18 +84,6 @@ jobs:
           New-Item -ItemType Directory -Force -Path "packages/app/src-tauri/binaries"
           Copy-Item "platform-tools/adb.exe" "packages/app/src-tauri/binaries/adb-x86_64-pc-windows-msvc.exe"
 
-      - name: Update version for release
-        shell: bash
-        run: |
-          VERSION="${{ needs.extract-version.outputs.version }}"
-          # Update package.json files
-          node -e "const pkg=require('./package.json'); pkg.version='${VERSION}'; require('fs').writeFileSync('./package.json', JSON.stringify(pkg, null, 2))"
-          node -e "const pkg=require('./packages/app/package.json'); pkg.version='${VERSION}'; require('fs').writeFileSync('./packages/app/package.json', JSON.stringify(pkg, null, 2))"
-          # Update tauri.conf.json
-          node -e "const conf=require('./packages/app/src-tauri/tauri.conf.json'); conf.version='${VERSION}'; require('fs').writeFileSync('./packages/app/src-tauri/tauri.conf.json', JSON.stringify(conf, null, 2))"
-          # Update Cargo.toml
-          sed -i.bak 's/^version = ".*"/version = "'"${VERSION}"'"/' packages/app/src-tauri/Cargo.toml || true
-
       - name: Set update endpoint for stable
         shell: bash
         run: |
@@ -113,17 +103,8 @@ jobs:
           projectPath: packages/app
           tagName: v${{ needs.extract-version.outputs.version }}
           releaseName: 'AWPA v${{ needs.extract-version.outputs.version }}'
-          releaseBody: |
-            ## AWPA v${{ needs.extract-version.outputs.version }}
-
-            ### Download
-            Choose the appropriate installer for your platform:
-            - **macOS (Apple Silicon)**: `.dmg` file for M1/M2/M3/M4 Macs
-            - **Windows**: `.msi` or `.exe` installer
-
-            ### Update Channel
-            This is a stable production release.
-          releaseDraft: true
+          releaseBody: ''
+          releaseDraft: false
           prerelease: false
           args: ${{ matrix.settings.args }}
           updaterJsonPreferNsis: true
