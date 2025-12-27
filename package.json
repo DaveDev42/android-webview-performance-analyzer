@@ -1,0 +1,23 @@
+{
+  "name": "awpa",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Android WebView Performance Analyzer",
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "tauri": "pnpm --filter @awpa/app tauri"
+  },
+  "keywords": [
+    "android",
+    "webview",
+    "performance",
+    "cdp",
+    "tauri"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "turbo": "^2.3.3"
+  },
+  "packageManager": "pnpm@9.15.1"
+}
