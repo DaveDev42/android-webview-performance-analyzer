@@ -13,7 +13,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "AWPA - Android WebView Performance Analyzer",
+        "title": "AWPA - Android WebView Performance Analyzer (Preview Test)",
         "width": 1200,
         "height": 800,
         "resizable": true,
