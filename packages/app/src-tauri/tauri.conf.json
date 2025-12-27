@@ -52,7 +52,7 @@
       "open": true
     },
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE3MkY4RjZDODY0MDg1RjMKUldUemhVQ0diSTh2cCtxRitBYml3MGJDVmRwWCtTWUVnQytkMDJIdlU0U2ZMbStqeVZHNVYrVVQK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQyOTE5MDg0QjEzQTlCQUQKUldTdG16cXhoSkNSUWh2M3ZRa1FON1lVb0FHSzRycDhPaEw5cXF0ZElxeUR0REdCb3YrSTNCZkYK",
       "endpoints": [
         "https://github.com/DaveDev42/android-webview-performance-analyzer/releases/latest/download/stable.json"
       ],
