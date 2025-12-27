@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "tauri": {
+      "command": "node",
+      "args": ["packages/app/node_modules/tauri-plugin-mcp/packages/tauri-mcp/dist/index.js"],
+      "env": {
+        "TAURI_PROJECT_ROOT": "packages/app"
+      }
+    }
+  }
+}

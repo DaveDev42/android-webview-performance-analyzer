@@ -5,6 +5,7 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
+    "mcp:default",
     "shell:allow-open",
     {
       "identifier": "shell:allow-execute",
