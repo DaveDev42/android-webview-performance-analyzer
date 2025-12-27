@@ -10,7 +10,9 @@ use chromiumoxide::page::Page;
 use chromiumoxide::Browser;
 use futures_util::StreamExt;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{broadcast, RwLock};
+use tokio::time::timeout;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -85,16 +87,34 @@ impl CdpClient {
     }
 
     /// Connect to a CDP target via WebSocket
+    /// For Android Chrome/WebView, we connect directly to the page's WebSocket URL
     pub async fn connect(&self, ws_url: &str) -> Result<(), CdpError> {
         {
             let mut state = self.state.write().await;
             *state = ConnectionState::Connecting;
         }
 
-        // Connect using chromiumoxide
-        let (browser, mut handler) = Browser::connect(ws_url)
-            .await
-            .map_err(|e| CdpError::ConnectionFailed(e.to_string()))?;
+        // For Android Chrome/WebView, connect directly to the page URL
+        // chromiumoxide can connect to individual page targets
+        // Add timeout to prevent hanging connections
+        let connect_result = timeout(
+            Duration::from_secs(10),
+            Browser::connect(ws_url)
+        ).await;
+
+        let (browser, mut handler) = match connect_result {
+            Ok(Ok(result)) => result,
+            Ok(Err(e)) => {
+                let mut state = self.state.write().await;
+                *state = ConnectionState::Disconnected;
+                return Err(CdpError::ConnectionFailed(e.to_string()));
+            }
+            Err(_) => {
+                let mut state = self.state.write().await;
+                *state = ConnectionState::Disconnected;
+                return Err(CdpError::ConnectionFailed("Connection timeout".into()));
+            }
+        };
 
         // Spawn handler task
         let event_tx = self.event_tx.clone();
@@ -106,13 +126,21 @@ impl CdpClient {
             }
         });
 
-        // Get the first page/target
+        // For page-level connections, create a Page wrapper directly
+        // Since we connected to a page URL, the browser IS the page essentially
         let pages = browser
             .pages()
             .await
             .map_err(|e| CdpError::BrowserError(e.to_string()))?;
 
-        let page = pages.into_iter().next();
+        // Get the page - for direct page connections, there should be one
+        let page = if let Some(p) = pages.into_iter().next() {
+            Some(p)
+        } else {
+            // If no pages found, try to create a new page context
+            // This is a fallback for some CDP implementations
+            browser.new_page("about:blank").await.ok()
+        };
 
         {
             let mut browser_lock = self.browser.write().await;
@@ -122,6 +150,11 @@ impl CdpClient {
         if let Some(p) = page {
             let mut page_lock = self.page.write().await;
             *page_lock = Some(p);
+        } else {
+            // Reset state if no page available
+            let mut state = self.state.write().await;
+            *state = ConnectionState::Disconnected;
+            return Err(CdpError::ConnectionFailed("No page available to connect".into()));
         }
 
         {
