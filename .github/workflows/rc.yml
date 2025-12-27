@@ -56,6 +56,24 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Download ADB binary (macOS)
+        if: matrix.settings.os == 'macos-latest'
+        run: |
+          curl -L -o platform-tools.zip https://dl.google.com/android/repository/platform-tools-latest-darwin.zip
+          unzip platform-tools.zip
+          mkdir -p packages/app/src-tauri/binaries
+          cp platform-tools/adb packages/app/src-tauri/binaries/adb-aarch64-apple-darwin
+          chmod +x packages/app/src-tauri/binaries/adb-aarch64-apple-darwin
+
+      - name: Download ADB binary (Windows)
+        if: matrix.settings.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://dl.google.com/android/repository/platform-tools-latest-windows.zip" -OutFile "platform-tools.zip"
+          Expand-Archive -Path "platform-tools.zip" -DestinationPath "."
+          New-Item -ItemType Directory -Force -Path "packages/app/src-tauri/binaries"
+          Copy-Item "platform-tools/adb.exe" "packages/app/src-tauri/binaries/adb-x86_64-pc-windows-msvc.exe"
+
       - name: Get RC version
         id: version
         shell: bash
