@@ -30,6 +30,9 @@ chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
 thiserror = "2"
 tracing = "0.1"
+taurpc = "0.5"
+specta = { version = "=2.0.0-rc.22", features = ["derive"] }
+specta-typescript = "0.0.9"
 
 [profile.dev]
 incremental = true

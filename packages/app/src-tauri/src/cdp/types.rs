@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
+use specta::Type;
 
 /// CDP target information from /json/list endpoint
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CdpTarget {
     pub id: String,
@@ -15,7 +16,7 @@ pub struct CdpTarget {
 }
 
 /// Performance metrics from CDP
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct PerformanceMetrics {
     pub timestamp: i64,
     pub js_heap_used_size: Option<f64>,
@@ -27,7 +28,7 @@ pub struct PerformanceMetrics {
 }
 
 /// Network request info
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct NetworkRequestInfo {
     pub request_id: String,
@@ -38,7 +39,7 @@ pub struct NetworkRequestInfo {
 }
 
 /// Network response info
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct NetworkResponseInfo {
     pub request_id: String,
@@ -49,7 +50,7 @@ pub struct NetworkResponseInfo {
 }
 
 /// CDP connection state
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Type)]
 pub enum ConnectionState {
     Disconnected,
     Connecting,
@@ -58,7 +59,7 @@ pub enum ConnectionState {
 }
 
 /// Collected metrics snapshot
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct MetricsSnapshot {
     pub timestamp: i64,
     pub performance: Option<PerformanceMetrics>,

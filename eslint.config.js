@@ -23,6 +23,6 @@ export default tseslint.config(
     },
   },
   {
-    ignores: ['**/dist/**', '**/node_modules/**', '**/target/**', '**/*.d.ts'],
+    ignores: ['**/dist/**', '**/node_modules/**', '**/target/**', '**/*.d.ts', '**/bindings.ts'],
   }
 );

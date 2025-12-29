@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
-use tauri::AppHandle;
+use specta::Type;
+use tauri::{AppHandle, Runtime};
 use tauri_plugin_shell::ShellExt;
 use thiserror::Error;
 
@@ -11,21 +12,21 @@ pub enum AdbError {
     CommandFailed(String),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct Device {
     pub id: String,
     pub name: String,
     pub status: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct WebView {
     pub socket_name: String,
     pub pid: u32,
     pub package_name: Option<String>,
 }
 
-pub async fn list_devices(app: &AppHandle) -> Result<Vec<Device>, AdbError> {
+pub async fn list_devices<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<Device>, AdbError> {
     let output = app
         .shell()
         .sidecar("adb")
@@ -69,7 +70,7 @@ pub async fn list_devices(app: &AppHandle) -> Result<Vec<Device>, AdbError> {
     Ok(devices)
 }
 
-pub async fn list_webviews(app: &AppHandle, device_id: &str) -> Result<Vec<WebView>, AdbError> {
+pub async fn list_webviews<R: Runtime>(app: &AppHandle<R>, device_id: &str) -> Result<Vec<WebView>, AdbError> {
     let output = app
         .shell()
         .sidecar("adb")
@@ -140,7 +141,7 @@ pub async fn list_webviews(app: &AppHandle, device_id: &str) -> Result<Vec<WebVi
     Ok(webviews)
 }
 
-async fn get_package_name(app: &AppHandle, device_id: &str, pid: u32) -> Result<String, AdbError> {
+async fn get_package_name<R: Runtime>(app: &AppHandle<R>, device_id: &str, pid: u32) -> Result<String, AdbError> {
     let output = app
         .shell()
         .sidecar("adb")
@@ -167,7 +168,7 @@ async fn get_package_name(app: &AppHandle, device_id: &str, pid: u32) -> Result<
     Err(AdbError::CommandFailed("Could not get package name".into()))
 }
 
-async fn get_pid_for_package(app: &AppHandle, device_id: &str, package: &str) -> Result<u32, AdbError> {
+async fn get_pid_for_package<R: Runtime>(app: &AppHandle<R>, device_id: &str, package: &str) -> Result<u32, AdbError> {
     let output = app
         .shell()
         .sidecar("adb")
@@ -190,8 +191,8 @@ async fn get_pid_for_package(app: &AppHandle, device_id: &str, package: &str) ->
     Err(AdbError::CommandFailed("Could not get PID".into()))
 }
 
-pub async fn forward_port(
-    app: &AppHandle,
+pub async fn forward_port<R: Runtime>(
+    app: &AppHandle<R>,
     device_id: &str,
     local_port: u16,
     socket_name: &str,
@@ -220,8 +221,8 @@ pub async fn forward_port(
     Ok(())
 }
 
-pub async fn remove_forward(
-    app: &AppHandle,
+pub async fn remove_forward<R: Runtime>(
+    app: &AppHandle<R>,
     device_id: &str,
     local_port: u16,
 ) -> Result<(), AdbError> {
@@ -249,7 +250,7 @@ pub async fn remove_forward(
     Ok(())
 }
 
-pub async fn remove_all_forwards(app: &AppHandle, device_id: &str) -> Result<(), AdbError> {
+pub async fn remove_all_forwards<R: Runtime>(app: &AppHandle<R>, device_id: &str) -> Result<(), AdbError> {
     let output = app
         .shell()
         .sidecar("adb")

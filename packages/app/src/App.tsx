@@ -1,5 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { useEffect, useCallback, useMemo } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
   MetricsChart,
@@ -7,124 +6,169 @@ import {
   MiniChart,
   NetworkRequests,
   SessionDetail,
+  SessionTabs,
   ExportDialog,
   ImportDialog,
 } from "./components";
 import { formatBytes, formatDuration } from "./utils";
-import type {
-  Device,
-  WebView,
-  PortForward,
-  CdpTarget,
-  PerformanceMetrics,
-  Session,
-  NetworkEvent,
-  ConnectionState,
-} from "./types";
-
-const MAX_HISTORY_POINTS = 60;
+import {
+  createTauRPCProxy,
+  type PerformanceMetrics,
+} from "./bindings";
+import type { NetworkEvent } from "./types";
+import {
+  useUiStore,
+  useDeviceStore,
+  useCdpStore,
+  useMetricsStore,
+  useSessionStore,
+  getConnectionStateDisplay,
+} from "./stores";
 
 function App() {
-  // Device State
-  const [devices, setDevices] = useState<Device[]>([]);
-  const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
-  const [webviews, setWebviews] = useState<WebView[]>([]);
-  const [portForwards, setPortForwards] = useState<PortForward[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [nextPort, setNextPort] = useState(9222);
+  // Create TauRPC proxy
+  const taurpc = useMemo(() => createTauRPCProxy(), []);
 
-  // CDP State
-  const [cdpTargets, setCdpTargets] = useState<CdpTarget[]>([]);
-  const [connectionState, setConnectionState] = useState<ConnectionState>("Disconnected");
-  const [selectedTarget, setSelectedTarget] = useState<CdpTarget | null>(null);
-  const [activePort, setActivePort] = useState<number | null>(null);
-  const [metrics, setMetrics] = useState<PerformanceMetrics | null>(null);
-  const [isCollecting, setIsCollecting] = useState(false);
+  // UI Store
+  const {
+    error,
+    setError,
+    showSessions,
+    setShowSessions,
+    toggleSessions,
+    showDetailedCharts,
+    toggleDetailedCharts,
+    exportSession,
+    setExportSession,
+    showImport,
+    setShowImport,
+    selectedSessionForView,
+    setSelectedSessionForView,
+    openSessionTabs,
+    openSessionTab,
+  } = useUiStore();
 
-  // Session State
-  const [currentSession, setCurrentSession] = useState<Session | null>(null);
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [showSessions, setShowSessions] = useState(false);
-  const [selectedSessionForView, setSelectedSessionForView] = useState<Session | null>(null);
+  // Device Store
+  const {
+    devices,
+    setDevices,
+    selectedDevice,
+    setSelectedDevice,
+    webviews,
+    setWebviews,
+    portForwards,
+    addPortForward,
+    removePortForward,
+    getPortForward,
+    nextPort,
+    incrementPort,
+    loading,
+    setLoading,
+  } = useDeviceStore();
 
-  // Metrics History
-  const [metricsHistory, setMetricsHistory] = useState<PerformanceMetrics[]>([]);
-  const [networkRequests, setNetworkRequests] = useState<NetworkEvent[]>([]);
+  // CDP Store
+  const {
+    cdpTargets,
+    setCdpTargets,
+    clearTargets,
+    connectionState,
+    setConnectionState,
+    selectedTarget,
+    setSelectedTarget,
+    activePort,
+    setActivePort,
+  } = useCdpStore();
 
-  // Export/Import dialogs
-  const [exportSession, setExportSession] = useState<Session | null>(null);
-  const [showImport, setShowImport] = useState(false);
+  // Metrics Store
+  const {
+    metrics,
+    setMetrics,
+    metricsHistory,
+    addMetricsToHistory,
+    clearHistory,
+    networkRequests,
+    addNetworkRequest,
+    clearNetworkRequests,
+    isCollecting,
+    setIsCollecting,
+    getHeapHistory,
+    getNodeHistory,
+  } = useMetricsStore();
 
-  // Chart view toggle
-  const [showDetailedCharts, setShowDetailedCharts] = useState(false);
+  // Session Store
+  const {
+    currentSession,
+    setCurrentSession,
+    sessions,
+    setSessions,
+    removeSession,
+  } = useSessionStore();
 
   const refreshDevices = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const result = await invoke<Device[]>("get_devices");
+      const result = await taurpc.api.get_devices();
       setDevices(result);
       if (selectedDevice && !result.find((d) => d.id === selectedDevice.id)) {
         setSelectedDevice(null);
-        setWebviews([]);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
-  }, [selectedDevice]);
+  }, [selectedDevice, taurpc, setLoading, setError, setDevices, setSelectedDevice]);
 
-  const loadWebviews = useCallback(async (deviceId: string) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await invoke<WebView[]>("get_webviews", { deviceId });
-      setWebviews(result);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const loadWebviews = useCallback(
+    async (deviceId: string) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const result = await taurpc.api.get_webviews(deviceId);
+        setWebviews(result);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [taurpc, setLoading, setError, setWebviews]
+  );
 
-  const loadSessions = async () => {
+  const loadSessions = useCallback(async () => {
     try {
-      const result = await invoke<Session[]>("list_sessions", { limit: 50 });
+      const result = await taurpc.api.list_sessions(50);
       setSessions(result);
     } catch (e) {
       console.error("Failed to load sessions:", e);
     }
-  };
+  }, [taurpc, setSessions]);
 
-  const startPortForward = async (webview: WebView) => {
+  const startPortForward = async (webview: { socket_name: string }) => {
     if (!selectedDevice) return;
     try {
       const port = nextPort;
-      await invoke("start_port_forward", {
+      await taurpc.api.start_port_forward(selectedDevice.id, webview.socket_name, port);
+      addPortForward({
         deviceId: selectedDevice.id,
         socketName: webview.socket_name,
         localPort: port,
       });
-      setPortForwards((prev) => [
-        ...prev,
-        { deviceId: selectedDevice.id, socketName: webview.socket_name, localPort: port },
-      ]);
-      setNextPort((p) => p + 1);
+      incrementPort();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
   };
 
-  const stopPortForward = async (pf: PortForward) => {
+  const stopPortForward = async (pf: { deviceId: string; localPort: number }) => {
     try {
-      await invoke("stop_port_forward", { deviceId: pf.deviceId, localPort: pf.localPort });
-      setPortForwards((prev) => prev.filter((p) => p.localPort !== pf.localPort));
+      await taurpc.api.stop_port_forward(pf.deviceId, pf.localPort);
+      removePortForward(pf.localPort);
       if (pf.localPort === activePort) {
         await disconnectCdp();
         setActivePort(null);
-        setCdpTargets([]);
+        clearTargets();
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -133,7 +177,7 @@ function App() {
 
   const loadCdpTargets = async (port: number) => {
     try {
-      const targets = await invoke<CdpTarget[]>("get_cdp_targets", { port });
+      const targets = await taurpc.api.get_cdp_targets(port);
       setCdpTargets(targets);
       setActivePort(port);
     } catch (e) {
@@ -141,16 +185,16 @@ function App() {
     }
   };
 
-  const connectCdp = async (target: CdpTarget) => {
+  const connectCdp = async (target: { webSocketDebuggerUrl: string | null; title: string; url: string; id: string }) => {
     if (!target.webSocketDebuggerUrl) {
       setError("No WebSocket URL available for this target");
       return;
     }
     try {
       setConnectionState("Connecting");
-      await invoke("connect_cdp", { wsUrl: target.webSocketDebuggerUrl });
+      await taurpc.api.connect_cdp(target.webSocketDebuggerUrl);
       setConnectionState("Connected");
-      setSelectedTarget(target);
+      setSelectedTarget(target as typeof selectedTarget);
     } catch (e) {
       setConnectionState("Disconnected");
       setError(e instanceof Error ? e.message : String(e));
@@ -162,13 +206,13 @@ function App() {
       if (currentSession) {
         await endSession();
       }
-      await invoke("disconnect_cdp");
+      await taurpc.api.disconnect_cdp();
       setConnectionState("Disconnected");
       setSelectedTarget(null);
       setMetrics(null);
       setIsCollecting(false);
-      setMetricsHistory([]);
-      setNetworkRequests([]);
+      clearHistory();
+      clearNetworkRequests();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -177,19 +221,17 @@ function App() {
   const startSession = async () => {
     if (!selectedDevice || !selectedTarget) return;
     try {
-      const session = await invoke<Session>("create_session", {
-        params: {
-          device_id: selectedDevice.id,
-          device_name: selectedDevice.name,
-          package_name: null,
-          target_title: selectedTarget.title,
-          webview_url: selectedTarget.url,
-        },
+      const session = await taurpc.api.create_session({
+        device_id: selectedDevice.id,
+        device_name: selectedDevice.name,
+        package_name: null,
+        target_title: selectedTarget.title,
+        webview_url: selectedTarget.url,
       });
       setCurrentSession(session);
-      setMetricsHistory([]);
-      setNetworkRequests([]);
-      await invoke("start_metrics_collection", { pollIntervalMs: 1000 });
+      clearHistory();
+      clearNetworkRequests();
+      await taurpc.api.start_metrics_collection(1000);
       setIsCollecting(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -199,9 +241,9 @@ function App() {
   const endSession = async () => {
     try {
       if (currentSession) {
-        await invoke("end_session", { sessionId: currentSession.id });
+        await taurpc.api.end_session(currentSession.id);
       }
-      await invoke("stop_metrics_collection");
+      await taurpc.api.stop_metrics_collection();
       setIsCollecting(false);
       setCurrentSession(null);
       await loadSessions();
@@ -212,22 +254,22 @@ function App() {
 
   const deleteSession = async (sessionId: string) => {
     try {
-      await invoke("delete_session", { sessionId });
-      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+      await taurpc.api.delete_session(sessionId);
+      removeSession(sessionId);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
   };
 
-  const fetchMetrics = async () => {
+  const fetchMetrics = useCallback(async () => {
     if (connectionState !== "Connected") return;
     try {
-      const result = await invoke<PerformanceMetrics>("get_performance_metrics");
+      const result = await taurpc.api.get_performance_metrics();
       setMetrics(result);
     } catch (e) {
       console.error("Failed to fetch metrics:", e);
     }
-  };
+  }, [connectionState, taurpc, setMetrics]);
 
   // Setup Tauri event listeners
   useEffect(() => {
@@ -237,12 +279,12 @@ function App() {
     const setupListeners = async () => {
       unlistenPerf = await listen<PerformanceMetrics>("metrics:performance", (event) => {
         setMetrics(event.payload);
-        setMetricsHistory((prev) => [...prev, event.payload].slice(-MAX_HISTORY_POINTS));
+        addMetricsToHistory(event.payload);
       });
 
       unlistenNetwork = await listen<NetworkEvent>("metrics:network", (event) => {
         if (event.payload.type === "NetworkComplete") {
-          setNetworkRequests((prev) => [event.payload, ...prev].slice(0, 50));
+          addNetworkRequest(event.payload);
         }
       });
     };
@@ -252,12 +294,12 @@ function App() {
       unlistenPerf?.();
       unlistenNetwork?.();
     };
-  }, []);
+  }, [setMetrics, addMetricsToHistory, addNetworkRequest]);
 
   useEffect(() => {
     refreshDevices();
     loadSessions();
-  }, []);
+  }, [refreshDevices, loadSessions]);
 
   useEffect(() => {
     if (selectedDevice) {
@@ -269,15 +311,12 @@ function App() {
     if (!isCollecting) return;
     const interval = setInterval(fetchMetrics, 1000);
     return () => clearInterval(interval);
-  }, [isCollecting, connectionState]);
-
-  const getPortForward = (socketName: string) =>
-    portForwards.find((pf) => pf.socketName === socketName);
+  }, [isCollecting, fetchMetrics]);
 
   // Calculate chart data
-  const heapHistory = metricsHistory.map((m) => m.js_heap_used_size ?? 0);
+  const heapHistory = getHeapHistory();
   const maxHeap = Math.max(...heapHistory, 1);
-  const nodeHistory = metricsHistory.map((m) => m.dom_nodes ?? 0);
+  const nodeHistory = getNodeHistory();
   const maxNodes = Math.max(...nodeHistory, 1);
 
   return (
@@ -303,7 +342,7 @@ function App() {
           </button>
           <button
             onClick={() => {
-              setShowSessions(!showSessions);
+              toggleSessions();
               if (!showSessions) loadSessions();
             }}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-sm"
@@ -356,7 +395,7 @@ function App() {
                       <tr key={session.id} className="border-t border-gray-700 hover:bg-gray-700/50">
                         <td className="p-3">
                           <button
-                            onClick={() => setSelectedSessionForView(session)}
+                            onClick={() => openSessionTab(session.id)}
                             className="text-left hover:text-blue-400"
                           >
                             <p className="font-medium truncate max-w-xs">
@@ -392,10 +431,10 @@ function App() {
                         <td className="p-3 text-right">
                           <div className="flex justify-end gap-2">
                             <button
-                              onClick={() => setSelectedSessionForView(session)}
+                              onClick={() => openSessionTab(session.id)}
                               className="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-sm"
                             >
-                              View
+                              Open
                             </button>
                             <button
                               onClick={() => setExportSession(session)}
@@ -572,7 +611,7 @@ function App() {
                     : "bg-gray-700 text-gray-400"
                 }`}
               >
-                {connectionState}
+                {getConnectionStateDisplay(connectionState)}
               </span>
             </div>
 
@@ -669,7 +708,7 @@ function App() {
                     <div className="flex items-center justify-between mb-3">
                       <h3 className="font-semibold">Performance Metrics</h3>
                       <button
-                        onClick={() => setShowDetailedCharts(!showDetailedCharts)}
+                        onClick={toggleDetailedCharts}
                         className="text-xs text-blue-400 hover:text-blue-300"
                       >
                         {showDetailedCharts ? "Hide Charts" : "Show Charts"}
@@ -812,6 +851,11 @@ function App() {
           onClose={() => setShowImport(false)}
           onImportComplete={loadSessions}
         />
+      )}
+
+      {/* Session Tabs View */}
+      {openSessionTabs.length > 0 && (
+        <SessionTabs onDeleteSession={deleteSession} />
       )}
     </div>
   );

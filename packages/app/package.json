@@ -15,12 +15,20 @@
   },
   "dependencies": {
     "@awpa/metrics-io": "workspace:*",
+    "@radix-ui/react-slot": "^1.2.4",
+    "@radix-ui/react-tabs": "^1.1.13",
     "@tauri-apps/api": "^2.1.1",
     "@tauri-apps/plugin-shell": "^2.2.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.562.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "recharts": "^2.14.1",
-    "tauri-plugin-mcp": "github:DaveDev42/tauri-plugin-mcp#main"
+    "tailwind-merge": "^3.4.0",
+    "tauri-plugin-mcp": "github:DaveDev42/tauri-plugin-mcp#main",
+    "taurpc": "^1.8.1",
+    "zustand": "^5.0.9"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.1.0",

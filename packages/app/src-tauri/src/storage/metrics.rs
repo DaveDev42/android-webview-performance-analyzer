@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
+use specta::Type;
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct StoredMetric {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<i64>,
@@ -11,7 +12,7 @@ pub struct StoredMetric {
     pub data: String, // JSON serialized metric data
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Type)]
 #[serde(rename_all = "lowercase")]
 pub enum MetricType {
     Performance,
@@ -63,7 +64,7 @@ impl StoredMetric {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct StoredNetworkRequest {
     pub id: String,
     pub session_id: String,

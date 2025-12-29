@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
+use specta::Type;
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct Session {
     pub id: String,
     pub device_id: String,
@@ -12,10 +13,12 @@ pub struct Session {
     pub started_at: i64,
     pub ended_at: Option<i64>,
     pub status: SessionStatus,
+    #[serde(skip)]
+    #[specta(skip)]
     pub metadata: Option<HashMap<String, serde_json::Value>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Type)]
 #[serde(rename_all = "lowercase")]
 pub enum SessionStatus {
     Active,

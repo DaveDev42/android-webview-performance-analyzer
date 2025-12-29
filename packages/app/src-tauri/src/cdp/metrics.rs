@@ -1,9 +1,9 @@
 use super::client::{CdpClient, CdpEvent};
 use super::types::PerformanceMetrics;
-use crate::storage::{Database, MetricType, StoredMetric, StoredNetworkRequest};
+use crate::storage::{Database, StoredMetric, StoredNetworkRequest};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Runtime};
 use tokio::sync::{broadcast, RwLock};
 use tokio::time::{interval, Duration};
 
@@ -47,22 +47,22 @@ pub enum MetricsEvent {
     },
 }
 
-pub struct MetricsCollector {
+pub struct MetricsCollector<R: Runtime> {
     client: Arc<CdpClient>,
     database: Arc<Database>,
     session_id: String,
-    app_handle: Option<AppHandle>,
+    app_handle: Option<AppHandle<R>>,
     requests: Arc<RwLock<HashMap<String, TrackedRequest>>>,
     event_tx: broadcast::Sender<MetricsEvent>,
     collecting: Arc<RwLock<bool>>,
 }
 
-impl MetricsCollector {
+impl<R: Runtime> MetricsCollector<R> {
     pub fn new(
         client: Arc<CdpClient>,
         database: Arc<Database>,
         session_id: String,
-        app_handle: Option<AppHandle>,
+        app_handle: Option<AppHandle<R>>,
     ) -> Self {
         let (event_tx, _) = broadcast::channel(1000);
         Self {
@@ -166,7 +166,7 @@ impl MetricsCollector {
         event_tx: &broadcast::Sender<MetricsEvent>,
         database: &Arc<Database>,
         session_id: &str,
-        app_handle: &Option<AppHandle>,
+        app_handle: &Option<AppHandle<R>>,
     ) {
         match event {
             CdpEvent::NetworkRequest {
