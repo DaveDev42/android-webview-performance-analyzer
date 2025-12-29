@@ -10,7 +10,8 @@
     "tauri": "pnpm --filter @awpa/app tauri",
     "lint": "eslint packages",
     "typecheck": "turbo typecheck",
-    "test": "turbo test"
+    "test": "turbo test",
+    "prepare": "husky"
   },
   "keywords": [
     "android",
@@ -25,8 +26,15 @@
     "eslint": "^9.17.0",
     "eslint-plugin-react-hooks": "^5.1.0",
     "eslint-plugin-react-refresh": "^0.4.16",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.7",
     "turbo": "^2.3.3",
     "typescript-eslint": "^8.18.2"
   },
-  "packageManager": "pnpm@9.15.1"
+  "packageManager": "pnpm@9.15.1",
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx}": [
+      "eslint --fix"
+    ]
+  }
 }
