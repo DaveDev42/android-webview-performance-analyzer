@@ -1,6 +1,6 @@
 [package]
 name = "awpa"
-version = "0.0.1"
+version = "0.0.2"
 description = "Android WebView Performance Analyzer"
 authors = ["you"]
 license = "MIT"
