@@ -35,6 +35,9 @@
   "lint-staged": {
     "*.{ts,tsx,js,jsx}": [
       "eslint --fix"
+    ],
+    "packages/app/src-tauri/**/*.rs": [
+      "bash -c 'cd packages/app/src-tauri && cargo fmt --all'"
     ]
   }
 }

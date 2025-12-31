@@ -72,8 +72,4 @@ impl Session {
             metadata: None,
         }
     }
-
-    pub fn duration_ms(&self) -> Option<i64> {
-        self.ended_at.map(|end| end - self.started_at)
-    }
 }

@@ -16,8 +16,6 @@ pub struct TrackedRequest {
     pub request_timestamp: f64,
     pub response_timestamp: Option<f64>,
     pub status: Option<i32>,
-    pub encoded_data_length: Option<f64>,
-    pub finished_timestamp: Option<f64>,
 }
 
 /// Metrics event for frontend
@@ -108,7 +106,8 @@ impl<R: Runtime> MetricsCollector<R> {
 
                 if let Ok(metrics) = client.get_performance_metrics().await {
                     // Store to database
-                    if let Ok(stored_metric) = StoredMetric::from_performance(&session_id, &metrics) {
+                    if let Ok(stored_metric) = StoredMetric::from_performance(&session_id, &metrics)
+                    {
                         let _ = database.store_metric(&stored_metric);
                     }
 
@@ -185,8 +184,6 @@ impl<R: Runtime> MetricsCollector<R> {
                         request_timestamp: timestamp,
                         response_timestamp: None,
                         status: None,
-                        encoded_data_length: None,
-                        finished_timestamp: None,
                     },
                 );
 
@@ -298,16 +295,5 @@ impl<R: Runtime> MetricsCollector<R> {
     pub async fn stop(&self) {
         let mut collecting = self.collecting.write().await;
         *collecting = false;
-    }
-
-    /// Subscribe to metrics events
-    pub fn subscribe(&self) -> broadcast::Receiver<MetricsEvent> {
-        self.event_tx.subscribe()
-    }
-
-    /// Get tracked requests
-    pub async fn get_pending_requests(&self) -> Vec<TrackedRequest> {
-        let reqs = self.requests.read().await;
-        reqs.values().cloned().collect()
     }
 }

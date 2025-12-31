@@ -1,10 +1,10 @@
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use thiserror::Error;
 
+use super::metrics::{MetricType, StoredMetric, StoredNetworkRequest};
 use super::session::{Session, SessionStatus};
-use super::metrics::{StoredMetric, MetricType, StoredNetworkRequest};
 
 #[derive(Error, Debug)]
 pub enum StorageError {
@@ -130,11 +130,15 @@ impl Database {
     /// Create a new session
     pub fn create_session(&self, session: &Session) -> Result<(), StorageError> {
         let conn = self.conn.lock().unwrap();
-        let metadata_json = session.metadata.as_ref()
-            .map(|m| serde_json::to_string(m))
+        let metadata_json = session
+            .metadata
+            .as_ref()
+            .map(serde_json::to_string)
             .transpose()?;
-        let tags_json = session.tags.as_ref()
-            .map(|t| serde_json::to_string(t))
+        let tags_json = session
+            .tags
+            .as_ref()
+            .map(serde_json::to_string)
             .transpose()?;
 
         conn.execute(
@@ -181,7 +185,7 @@ impl Database {
         let mut stmt = conn.prepare(
             "SELECT id, device_id, device_name, webview_url, package_name,
                     target_title, started_at, ended_at, status, display_name, tags, metadata
-             FROM sessions WHERE id = ?1"
+             FROM sessions WHERE id = ?1",
         )?;
 
         let mut rows = stmt.query(params![session_id])?;
@@ -205,9 +209,7 @@ impl Database {
         );
 
         let mut stmt = conn.prepare(&query)?;
-        let rows = stmt.query_map([], |row| {
-            Ok(Self::row_to_session(row).unwrap())
-        })?;
+        let rows = stmt.query_map([], |row| Ok(Self::row_to_session(row).unwrap()))?;
 
         let sessions: Result<Vec<_>, _> = rows.collect();
         Ok(sessions?)
@@ -216,10 +218,7 @@ impl Database {
     /// Delete a session and all related data
     pub fn delete_session(&self, session_id: &str) -> Result<(), StorageError> {
         let conn = self.conn.lock().unwrap();
-        let rows = conn.execute(
-            "DELETE FROM sessions WHERE id = ?1",
-            params![session_id],
-        )?;
+        let rows = conn.execute("DELETE FROM sessions WHERE id = ?1", params![session_id])?;
 
         if rows == 0 {
             return Err(StorageError::SessionNotFound(session_id.to_string()));
@@ -229,7 +228,11 @@ impl Database {
     }
 
     /// Update session display name
-    pub fn update_session_name(&self, session_id: &str, display_name: Option<&str>) -> Result<(), StorageError> {
+    pub fn update_session_name(
+        &self,
+        session_id: &str,
+        display_name: Option<&str>,
+    ) -> Result<(), StorageError> {
         let conn = self.conn.lock().unwrap();
         let rows = conn.execute(
             "UPDATE sessions SET display_name = ?1 WHERE id = ?2",
@@ -244,11 +247,13 @@ impl Database {
     }
 
     /// Update session tags
-    pub fn update_session_tags(&self, session_id: &str, tags: Option<&[String]>) -> Result<(), StorageError> {
+    pub fn update_session_tags(
+        &self,
+        session_id: &str,
+        tags: Option<&[String]>,
+    ) -> Result<(), StorageError> {
         let conn = self.conn.lock().unwrap();
-        let tags_json = tags
-            .map(|t| serde_json::to_string(t))
-            .transpose()?;
+        let tags_json = tags.map(serde_json::to_string).transpose()?;
 
         let rows = conn.execute(
             "UPDATE sessions SET tags = ?1 WHERE id = ?2",
@@ -293,7 +298,9 @@ impl Database {
         }
         if let Some(tag_list) = tags {
             // Check if any of the tags match (JSON array contains)
-            let tag_conditions: Vec<String> = tag_list.iter().enumerate()
+            let tag_conditions: Vec<String> = tag_list
+                .iter()
+                .enumerate()
                 .map(|(i, _)| format!("tags LIKE ?{}", param_idx + i))
                 .collect();
             if !tag_conditions.is_empty() {
@@ -335,7 +342,8 @@ impl Database {
             }
         }
 
-        let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
 
         let rows = stmt.query_map(params_refs.as_slice(), |row| {
             Ok(Self::row_to_session(row).unwrap())
@@ -362,9 +370,7 @@ impl Database {
             ended_at: row.get(7)?,
             status: SessionStatus::from_str(&status_str),
             display_name,
-            tags: tags_json
-                .map(|s| serde_json::from_str(&s))
-                .transpose()?,
+            tags: tags_json.map(|s| serde_json::from_str(&s)).transpose()?,
             metadata: metadata_json
                 .map(|s| serde_json::from_str(&s))
                 .transpose()?,
@@ -388,28 +394,6 @@ impl Database {
         )?;
 
         Ok(conn.last_insert_rowid())
-    }
-
-    /// Store multiple metrics in a batch
-    pub fn store_metrics_batch(&self, metrics: &[StoredMetric]) -> Result<(), StorageError> {
-        let mut conn = self.conn.lock().unwrap();
-        let tx = conn.transaction()?;
-
-        for metric in metrics {
-            tx.execute(
-                "INSERT INTO metrics (session_id, timestamp, metric_type, data)
-                 VALUES (?1, ?2, ?3, ?4)",
-                params![
-                    metric.session_id,
-                    metric.timestamp,
-                    metric.metric_type.as_str(),
-                    metric.data,
-                ],
-            )?;
-        }
-
-        tx.commit()?;
-        Ok(())
     }
 
     /// Get metrics for a session
@@ -460,7 +444,8 @@ impl Database {
             params_vec.push(Box::new(et));
         }
 
-        let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
 
         let rows = stmt.query_map(params_refs.as_slice(), |row| {
             let type_str: String = row.get(3)?;
@@ -480,10 +465,15 @@ impl Database {
     // ==================== Network Request Operations ====================
 
     /// Store a network request
-    pub fn store_network_request(&self, request: &StoredNetworkRequest) -> Result<(), StorageError> {
+    pub fn store_network_request(
+        &self,
+        request: &StoredNetworkRequest,
+    ) -> Result<(), StorageError> {
         let conn = self.conn.lock().unwrap();
-        let headers_json = request.headers.as_ref()
-            .map(|h| serde_json::to_string(h))
+        let headers_json = request
+            .headers
+            .as_ref()
+            .map(serde_json::to_string)
             .transpose()?;
 
         conn.execute(
@@ -538,8 +528,7 @@ impl Database {
                 response_time: row.get(6)?,
                 duration_ms: row.get(7)?,
                 size_bytes: row.get(8)?,
-                headers: headers_json
-                    .map(|s| serde_json::from_str(&s).unwrap_or_default()),
+                headers: headers_json.map(|s| serde_json::from_str(&s).unwrap_or_default()),
             })
         })?;
 

@@ -43,17 +43,10 @@ impl MetricType {
 }
 
 impl StoredMetric {
-    pub fn new(session_id: String, metric_type: MetricType, data: String) -> Self {
-        Self {
-            id: None,
-            session_id,
-            timestamp: chrono::Utc::now().timestamp_millis(),
-            metric_type,
-            data,
-        }
-    }
-
-    pub fn from_performance(session_id: &str, metrics: &crate::cdp::PerformanceMetrics) -> Result<Self, serde_json::Error> {
+    pub fn from_performance(
+        session_id: &str,
+        metrics: &crate::cdp::PerformanceMetrics,
+    ) -> Result<Self, serde_json::Error> {
         Ok(Self {
             id: None,
             session_id: session_id.to_string(),
@@ -76,27 +69,4 @@ pub struct StoredNetworkRequest {
     pub duration_ms: Option<f64>,
     pub size_bytes: Option<f64>,
     pub headers: Option<HashMap<String, String>>,
-}
-
-impl StoredNetworkRequest {
-    pub fn new(
-        session_id: &str,
-        request_id: &str,
-        url: String,
-        method: String,
-        request_time: i64,
-    ) -> Self {
-        Self {
-            id: request_id.to_string(),
-            session_id: session_id.to_string(),
-            url,
-            method: Some(method),
-            status_code: None,
-            request_time,
-            response_time: None,
-            duration_ms: None,
-            size_bytes: None,
-            headers: None,
-        }
-    }
 }

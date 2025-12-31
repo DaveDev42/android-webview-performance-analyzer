@@ -1,19 +1,19 @@
 use super::types::{CdpTarget, ConnectionState, PerformanceMetrics};
+use chromiumoxide::cdp::browser_protocol::network::EnableParams as NetworkEnableParams;
 use chromiumoxide::cdp::browser_protocol::network::{
     EventLoadingFinished, EventRequestWillBeSent, EventResponseReceived,
 };
 use chromiumoxide::cdp::browser_protocol::performance::{
     EnableParams as PerfEnableParams, GetMetricsParams,
 };
-use chromiumoxide::cdp::browser_protocol::network::EnableParams as NetworkEnableParams;
 use chromiumoxide::page::Page;
 use chromiumoxide::Browser;
 use futures_util::StreamExt;
 use std::sync::Arc;
 use std::time::Duration;
+use thiserror::Error;
 use tokio::sync::{broadcast, RwLock};
 use tokio::time::timeout;
-use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum CdpError {
@@ -21,8 +21,6 @@ pub enum CdpError {
     FetchTargetsFailed(String),
     #[error("Failed to connect: {0}")]
     ConnectionFailed(String),
-    #[error("No WebSocket URL available for target")]
-    NoWebSocketUrl,
     #[error("Not connected")]
     NotConnected,
     #[error("Browser error: {0}")]
@@ -40,7 +38,6 @@ pub struct CdpClient {
 pub enum CdpEvent {
     Connected,
     Disconnected,
-    PerformanceMetrics(PerformanceMetrics),
     NetworkRequest {
         request_id: String,
         url: String,
@@ -57,7 +54,6 @@ pub enum CdpEvent {
         encoded_data_length: f64,
         timestamp: f64,
     },
-    Error(String),
 }
 
 impl CdpClient {
@@ -97,10 +93,7 @@ impl CdpClient {
         // For Android Chrome/WebView, connect directly to the page URL
         // chromiumoxide can connect to individual page targets
         // Add timeout to prevent hanging connections
-        let connect_result = timeout(
-            Duration::from_secs(10),
-            Browser::connect(ws_url)
-        ).await;
+        let connect_result = timeout(Duration::from_secs(10), Browser::connect(ws_url)).await;
 
         let (browser, mut handler) = match connect_result {
             Ok(Ok(result)) => result,
@@ -117,11 +110,10 @@ impl CdpClient {
         };
 
         // Spawn handler task
-        let event_tx = self.event_tx.clone();
         tokio::spawn(async move {
             while let Some(event) = handler.next().await {
                 if let Err(e) = event {
-                    let _ = event_tx.send(CdpEvent::Error(e.to_string()));
+                    tracing::warn!("CDP handler error: {}", e);
                 }
             }
         });
@@ -154,7 +146,9 @@ impl CdpClient {
             // Reset state if no page available
             let mut state = self.state.write().await;
             *state = ConnectionState::Disconnected;
-            return Err(CdpError::ConnectionFailed("No page available to connect".into()));
+            return Err(CdpError::ConnectionFailed(
+                "No page available to connect".into(),
+            ));
         }
 
         {
