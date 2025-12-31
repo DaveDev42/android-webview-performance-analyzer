@@ -1,7 +1,7 @@
 mod database;
-mod session;
 mod metrics;
+mod session;
 
-pub use database::{Database, StorageError};
-pub use session::{Session, SessionStatus};
-pub use metrics::{StoredMetric, MetricType, StoredNetworkRequest};
+pub use database::Database;
+pub use metrics::{MetricType, StoredMetric, StoredNetworkRequest};
+pub use session::Session;

@@ -5,8 +5,8 @@ mod storage;
 
 use cdp::CdpClient;
 use procedures::{Api, ApiImpl, ManagedState, MetricsCollectorHolder};
-use storage::Database;
 use std::sync::Arc;
+use storage::Database;
 use tauri::Manager;
 use tokio::sync::RwLock;
 
@@ -31,7 +31,10 @@ pub fn run() {
         .plugin(tauri_plugin_mcp::init())
         .setup(|app| {
             // Initialize database
-            let app_data_dir = app.path().app_data_dir().expect("Failed to get app data dir");
+            let app_data_dir = app
+                .path()
+                .app_data_dir()
+                .expect("Failed to get app data dir");
             let db_path = Database::get_db_path(&app_data_dir);
             let db = Database::new(db_path).expect("Failed to initialize database");
 

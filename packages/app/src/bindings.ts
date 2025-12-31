@@ -27,7 +27,15 @@ export type PerformanceMetrics = { timestamp: number; js_heap_used_size: number 
 
 export type PortForwardResult = { local_port: number; socket_name: string }
 
-export type Session = { id: string; device_id: string; device_name: string | null; webview_url: string | null; package_name: string | null; target_title: string | null; started_at: number; ended_at: number | null; status: SessionStatus; display_name: string | null; tags: string[] | null }
+export type Session = { id: string; device_id: string; device_name: string | null; webview_url: string | null; package_name: string | null; target_title: string | null; started_at: number; ended_at: number | null; status: SessionStatus; 
+/**
+ * User-defined display name for the session
+ */
+display_name: string | null; 
+/**
+ * Tags for categorizing sessions (stored as JSON array)
+ */
+tags: string[] | null }
 
 export type SessionStatus = "active" | "completed" | "aborted"
 
@@ -38,27 +46,27 @@ export type StoredNetworkRequest = { id: string; session_id: string; url: string
 export type WebView = { socket_name: string; pid: number; package_name: string | null }
 
 const ARGS_MAP = { 'api':'{"connect_cdp":["ws_url"],"create_session":["params"],"delete_session":["session_id"],"disconnect_cdp":[],"end_session":["session_id"],"get_cdp_state":[],"get_cdp_targets":["port"],"get_devices":[],"get_performance_metrics":[],"get_session":["session_id"],"get_session_metrics":["session_id","metric_type","start_time","end_time","limit"],"get_session_network_requests":["session_id","limit"],"get_webviews":["device_id"],"list_sessions":["limit"],"search_sessions":["query","device_id","status","tags","limit"],"start_metrics_collection":["poll_interval_ms"],"start_port_forward":["device_id","socket_name","local_port"],"stop_all_port_forwards":["device_id"],"stop_metrics_collection":[],"stop_port_forward":["device_id","local_port"],"update_session_name":["session_id","display_name"],"update_session_tags":["session_id","tags"]}' }
-export type Router = { "api": {connect_cdp: (wsUrl: string) => Promise<null>,
-create_session: (params: CreateSessionParams) => Promise<Session>,
-delete_session: (sessionId: string) => Promise<null>,
-disconnect_cdp: () => Promise<null>,
-end_session: (sessionId: string | null) => Promise<null>,
-get_cdp_state: () => Promise<ConnectionState>,
-get_cdp_targets: (port: number) => Promise<CdpTarget[]>,
-get_devices: () => Promise<Device[]>,
-get_performance_metrics: () => Promise<PerformanceMetrics>,
-get_session: (sessionId: string) => Promise<Session | null>,
-get_session_metrics: (sessionId: string, metricType: string | null, startTime: number | null, endTime: number | null, limit: number | null) => Promise<StoredMetric[]>,
-get_session_network_requests: (sessionId: string, limit: number | null) => Promise<StoredNetworkRequest[]>,
-get_webviews: (deviceId: string) => Promise<WebView[]>,
-list_sessions: (limit: number | null) => Promise<Session[]>,
-search_sessions: (query: string | null, deviceId: string | null, status: string | null, tags: string[] | null, limit: number | null) => Promise<Session[]>,
-start_metrics_collection: (pollIntervalMs: number | null) => Promise<null>,
-start_port_forward: (deviceId: string, socketName: string, localPort: number) => Promise<PortForwardResult>,
-stop_all_port_forwards: (deviceId: string) => Promise<null>,
-stop_metrics_collection: () => Promise<null>,
-stop_port_forward: (deviceId: string, localPort: number) => Promise<null>,
-update_session_name: (sessionId: string, displayName: string | null) => Promise<null>,
+export type Router = { "api": {connect_cdp: (wsUrl: string) => Promise<null>, 
+create_session: (params: CreateSessionParams) => Promise<Session>, 
+delete_session: (sessionId: string) => Promise<null>, 
+disconnect_cdp: () => Promise<null>, 
+end_session: (sessionId: string | null) => Promise<null>, 
+get_cdp_state: () => Promise<ConnectionState>, 
+get_cdp_targets: (port: number) => Promise<CdpTarget[]>, 
+get_devices: () => Promise<Device[]>, 
+get_performance_metrics: () => Promise<PerformanceMetrics>, 
+get_session: (sessionId: string) => Promise<Session | null>, 
+get_session_metrics: (sessionId: string, metricType: string | null, startTime: number | null, endTime: number | null, limit: number | null) => Promise<StoredMetric[]>, 
+get_session_network_requests: (sessionId: string, limit: number | null) => Promise<StoredNetworkRequest[]>, 
+get_webviews: (deviceId: string) => Promise<WebView[]>, 
+list_sessions: (limit: number | null) => Promise<Session[]>, 
+search_sessions: (query: string | null, deviceId: string | null, status: string | null, tags: string[] | null, limit: number | null) => Promise<Session[]>, 
+start_metrics_collection: (pollIntervalMs: number | null) => Promise<null>, 
+start_port_forward: (deviceId: string, socketName: string, localPort: number) => Promise<PortForwardResult>, 
+stop_all_port_forwards: (deviceId: string) => Promise<null>, 
+stop_metrics_collection: () => Promise<null>, 
+stop_port_forward: (deviceId: string, localPort: number) => Promise<null>, 
+update_session_name: (sessionId: string, displayName: string | null) => Promise<null>, 
 update_session_tags: (sessionId: string, tags: string[] | null) => Promise<null>} };
 
 

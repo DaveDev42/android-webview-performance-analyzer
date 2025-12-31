@@ -70,7 +70,10 @@ pub async fn list_devices<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<Device>,
     Ok(devices)
 }
 
-pub async fn list_webviews<R: Runtime>(app: &AppHandle<R>, device_id: &str) -> Result<Vec<WebView>, AdbError> {
+pub async fn list_webviews<R: Runtime>(
+    app: &AppHandle<R>,
+    device_id: &str,
+) -> Result<Vec<WebView>, AdbError> {
     let output = app
         .shell()
         .sidecar("adb")
@@ -141,7 +144,11 @@ pub async fn list_webviews<R: Runtime>(app: &AppHandle<R>, device_id: &str) -> R
     Ok(webviews)
 }
 
-async fn get_package_name<R: Runtime>(app: &AppHandle<R>, device_id: &str, pid: u32) -> Result<String, AdbError> {
+async fn get_package_name<R: Runtime>(
+    app: &AppHandle<R>,
+    device_id: &str,
+    pid: u32,
+) -> Result<String, AdbError> {
     let output = app
         .shell()
         .sidecar("adb")
@@ -168,7 +175,11 @@ async fn get_package_name<R: Runtime>(app: &AppHandle<R>, device_id: &str, pid: 
     Err(AdbError::CommandFailed("Could not get package name".into()))
 }
 
-async fn get_pid_for_package<R: Runtime>(app: &AppHandle<R>, device_id: &str, package: &str) -> Result<u32, AdbError> {
+async fn get_pid_for_package<R: Runtime>(
+    app: &AppHandle<R>,
+    device_id: &str,
+    package: &str,
+) -> Result<u32, AdbError> {
     let output = app
         .shell()
         .sidecar("adb")
@@ -250,7 +261,10 @@ pub async fn remove_forward<R: Runtime>(
     Ok(())
 }
 
-pub async fn remove_all_forwards<R: Runtime>(app: &AppHandle<R>, device_id: &str) -> Result<(), AdbError> {
+pub async fn remove_all_forwards<R: Runtime>(
+    app: &AppHandle<R>,
+    device_id: &str,
+) -> Result<(), AdbError> {
     let output = app
         .shell()
         .sidecar("adb")
