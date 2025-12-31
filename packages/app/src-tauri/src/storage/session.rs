@@ -13,6 +13,10 @@ pub struct Session {
     pub started_at: i64,
     pub ended_at: Option<i64>,
     pub status: SessionStatus,
+    /// User-defined display name for the session
+    pub display_name: Option<String>,
+    /// Tags for categorizing sessions (stored as JSON array)
+    pub tags: Option<Vec<String>>,
     #[serde(skip)]
     #[specta(skip)]
     pub metadata: Option<HashMap<String, serde_json::Value>>,
@@ -63,6 +67,8 @@ impl Session {
             started_at: chrono::Utc::now().timestamp_millis(),
             ended_at: None,
             status: SessionStatus::Active,
+            display_name: None,
+            tags: None,
             metadata: None,
         }
     }

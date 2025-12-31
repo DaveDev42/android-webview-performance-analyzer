@@ -119,6 +119,27 @@ pub trait Api {
         session_id: String,
     ) -> Result<(), String>;
 
+    async fn update_session_name<R: Runtime>(
+        window: Window<R>,
+        session_id: String,
+        display_name: Option<String>,
+    ) -> Result<(), String>;
+
+    async fn update_session_tags<R: Runtime>(
+        window: Window<R>,
+        session_id: String,
+        tags: Option<Vec<String>>,
+    ) -> Result<(), String>;
+
+    async fn search_sessions<R: Runtime>(
+        window: Window<R>,
+        query: Option<String>,
+        device_id: Option<String>,
+        status: Option<String>,
+        tags: Option<Vec<String>>,
+        limit: Option<u32>,
+    ) -> Result<Vec<Session>, String>;
+
     // ============ Metrics Storage Commands ============
 
     async fn get_session_metrics<R: Runtime>(
@@ -390,6 +411,54 @@ impl Api for ApiImpl {
         state
             .database
             .delete_session(&session_id)
+            .map_err(|e| e.to_string())
+    }
+
+    async fn update_session_name<R: Runtime>(
+        self,
+        window: Window<R>,
+        session_id: String,
+        display_name: Option<String>,
+    ) -> Result<(), String> {
+        let state = window.state::<ManagedState>();
+        state
+            .database
+            .update_session_name(&session_id, display_name.as_deref())
+            .map_err(|e| e.to_string())
+    }
+
+    async fn update_session_tags<R: Runtime>(
+        self,
+        window: Window<R>,
+        session_id: String,
+        tags: Option<Vec<String>>,
+    ) -> Result<(), String> {
+        let state = window.state::<ManagedState>();
+        state
+            .database
+            .update_session_tags(&session_id, tags.as_deref())
+            .map_err(|e| e.to_string())
+    }
+
+    async fn search_sessions<R: Runtime>(
+        self,
+        window: Window<R>,
+        query: Option<String>,
+        device_id: Option<String>,
+        status: Option<String>,
+        tags: Option<Vec<String>>,
+        limit: Option<u32>,
+    ) -> Result<Vec<Session>, String> {
+        let state = window.state::<ManagedState>();
+        state
+            .database
+            .search_sessions(
+                query.as_deref(),
+                device_id.as_deref(),
+                status.as_deref(),
+                tags.as_deref(),
+                limit,
+            )
             .map_err(|e| e.to_string())
     }
 

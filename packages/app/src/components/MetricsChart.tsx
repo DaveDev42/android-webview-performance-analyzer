@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import {
   LineChart,
   Line,
@@ -7,17 +8,32 @@ import {
   Tooltip,
   ResponsiveContainer,
   Legend,
+  Brush,
 } from "recharts";
 import type { PerformanceMetrics } from "../types";
 import { formatTime } from "../utils";
+import { useMetricsStore } from "@/stores";
+import { TimeRangeSelector } from "./TimeRangeSelector";
 
 interface MetricsChartProps {
   data: PerformanceMetrics[];
   height?: number;
+  showBrush?: boolean;
+  showTimeSelector?: boolean;
+  syncId?: string;
 }
 
-export function MetricsChart({ data, height = 300 }: MetricsChartProps) {
-  const chartData = data.map((m) => ({
+export function MetricsChart({
+  data,
+  height = 300,
+  showBrush = true,
+  showTimeSelector = true,
+  syncId,
+}: MetricsChartProps) {
+  const { setBrushRange, brushRange } = useMetricsStore();
+
+  const chartData = data.map((m, index) => ({
+    index,
     time: formatTime(m.timestamp),
     timestamp: m.timestamp,
     heapUsed: m.js_heap_used_size ? m.js_heap_used_size / (1024 * 1024) : null,
@@ -25,11 +41,30 @@ export function MetricsChart({ data, height = 300 }: MetricsChartProps) {
     domNodes: m.dom_nodes,
   }));
 
+  const handleBrushChange = useCallback(
+    (brushData: { startIndex?: number; endIndex?: number } | null) => {
+      if (
+        brushData &&
+        typeof brushData.startIndex === "number" &&
+        typeof brushData.endIndex === "number"
+      ) {
+        setBrushRange({
+          startIndex: brushData.startIndex,
+          endIndex: brushData.endIndex,
+        });
+      }
+    },
+    [setBrushRange]
+  );
+
   return (
     <div className="bg-gray-800 rounded-lg p-4">
-      <h3 className="text-sm font-semibold text-gray-300 mb-4">Memory Usage</h3>
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-semibold text-gray-300">Memory Usage</h3>
+        {showTimeSelector && <TimeRangeSelector />}
+      </div>
       <ResponsiveContainer width="100%" height={height}>
-        <LineChart data={chartData}>
+        <LineChart data={chartData} syncId={syncId}>
           <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
           <XAxis
             dataKey="time"
@@ -82,6 +117,17 @@ export function MetricsChart({ data, height = 300 }: MetricsChartProps) {
             strokeDasharray="5 5"
             dot={false}
           />
+          {showBrush && chartData.length > 10 && (
+            <Brush
+              dataKey="time"
+              height={30}
+              stroke="#3b82f6"
+              fill="#1f2937"
+              onChange={handleBrushChange}
+              startIndex={brushRange?.startIndex}
+              endIndex={brushRange?.endIndex}
+            />
+          )}
         </LineChart>
       </ResponsiveContainer>
     </div>
@@ -91,9 +137,10 @@ export function MetricsChart({ data, height = 300 }: MetricsChartProps) {
 interface DomNodesChartProps {
   data: PerformanceMetrics[];
   height?: number;
+  syncId?: string;
 }
 
-export function DomNodesChart({ data, height = 200 }: DomNodesChartProps) {
+export function DomNodesChart({ data, height = 200, syncId }: DomNodesChartProps) {
   const chartData = data.map((m) => ({
     time: formatTime(m.timestamp),
     domNodes: m.dom_nodes,
@@ -104,7 +151,7 @@ export function DomNodesChart({ data, height = 200 }: DomNodesChartProps) {
     <div className="bg-gray-800 rounded-lg p-4">
       <h3 className="text-sm font-semibold text-gray-300 mb-4">DOM & Layout</h3>
       <ResponsiveContainer width="100%" height={height}>
-        <LineChart data={chartData}>
+        <LineChart data={chartData} syncId={syncId}>
           <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
           <XAxis
             dataKey="time"

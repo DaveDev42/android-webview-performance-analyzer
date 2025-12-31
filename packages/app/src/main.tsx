@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { initMcpBridge } from "tauri-plugin-mcp";
 import App from "./App";
+import { Toaster } from "./components/ui/toaster";
 import "./index.css";
 
 initMcpBridge().catch((err) =>
@@ -11,5 +12,6 @@ initMcpBridge().catch((err) =>
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <App />
+    <Toaster />
   </React.StrictMode>
 );

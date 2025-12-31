@@ -68,10 +68,16 @@ impl Database {
                 started_at INTEGER NOT NULL,
                 ended_at INTEGER,
                 status TEXT NOT NULL DEFAULT 'active',
+                display_name TEXT,
+                tags TEXT,
                 metadata TEXT
             )",
             [],
         )?;
+
+        // Migration: Add display_name and tags columns if they don't exist
+        let _ = conn.execute("ALTER TABLE sessions ADD COLUMN display_name TEXT", []);
+        let _ = conn.execute("ALTER TABLE sessions ADD COLUMN tags TEXT", []);
 
         // Create metrics table (time-series data)
         conn.execute(
@@ -127,11 +133,14 @@ impl Database {
         let metadata_json = session.metadata.as_ref()
             .map(|m| serde_json::to_string(m))
             .transpose()?;
+        let tags_json = session.tags.as_ref()
+            .map(|t| serde_json::to_string(t))
+            .transpose()?;
 
         conn.execute(
             "INSERT INTO sessions (id, device_id, device_name, webview_url, package_name,
-                                   target_title, started_at, ended_at, status, metadata)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                                   target_title, started_at, ended_at, status, display_name, tags, metadata)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 session.id,
                 session.device_id,
@@ -142,6 +151,8 @@ impl Database {
                 session.started_at,
                 session.ended_at,
                 session.status.as_str(),
+                session.display_name,
+                tags_json,
                 metadata_json,
             ],
         )?;
@@ -169,7 +180,7 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, device_id, device_name, webview_url, package_name,
-                    target_title, started_at, ended_at, status, metadata
+                    target_title, started_at, ended_at, status, display_name, tags, metadata
              FROM sessions WHERE id = ?1"
         )?;
 
@@ -188,7 +199,7 @@ impl Database {
         let limit_clause = limit.map(|l| format!(" LIMIT {}", l)).unwrap_or_default();
         let query = format!(
             "SELECT id, device_id, device_name, webview_url, package_name,
-                    target_title, started_at, ended_at, status, metadata
+                    target_title, started_at, ended_at, status, display_name, tags, metadata
              FROM sessions ORDER BY started_at DESC{}",
             limit_clause
         );
@@ -217,9 +228,128 @@ impl Database {
         Ok(())
     }
 
+    /// Update session display name
+    pub fn update_session_name(&self, session_id: &str, display_name: Option<&str>) -> Result<(), StorageError> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute(
+            "UPDATE sessions SET display_name = ?1 WHERE id = ?2",
+            params![display_name, session_id],
+        )?;
+
+        if rows == 0 {
+            return Err(StorageError::SessionNotFound(session_id.to_string()));
+        }
+
+        Ok(())
+    }
+
+    /// Update session tags
+    pub fn update_session_tags(&self, session_id: &str, tags: Option<&[String]>) -> Result<(), StorageError> {
+        let conn = self.conn.lock().unwrap();
+        let tags_json = tags
+            .map(|t| serde_json::to_string(t))
+            .transpose()?;
+
+        let rows = conn.execute(
+            "UPDATE sessions SET tags = ?1 WHERE id = ?2",
+            params![tags_json, session_id],
+        )?;
+
+        if rows == 0 {
+            return Err(StorageError::SessionNotFound(session_id.to_string()));
+        }
+
+        Ok(())
+    }
+
+    /// Search sessions with filters
+    pub fn search_sessions(
+        &self,
+        query: Option<&str>,
+        device_id: Option<&str>,
+        status: Option<&str>,
+        tags: Option<&[String]>,
+        limit: Option<u32>,
+    ) -> Result<Vec<Session>, StorageError> {
+        let conn = self.conn.lock().unwrap();
+
+        let mut conditions = Vec::new();
+        let mut param_idx = 1;
+
+        if query.is_some() {
+            conditions.push(format!(
+                "(display_name LIKE ?{} OR target_title LIKE ?{} OR package_name LIKE ?{})",
+                param_idx, param_idx, param_idx
+            ));
+            param_idx += 1;
+        }
+        if device_id.is_some() {
+            conditions.push(format!("device_id = ?{}", param_idx));
+            param_idx += 1;
+        }
+        if status.is_some() {
+            conditions.push(format!("status = ?{}", param_idx));
+            param_idx += 1;
+        }
+        if let Some(tag_list) = tags {
+            // Check if any of the tags match (JSON array contains)
+            let tag_conditions: Vec<String> = tag_list.iter().enumerate()
+                .map(|(i, _)| format!("tags LIKE ?{}", param_idx + i))
+                .collect();
+            if !tag_conditions.is_empty() {
+                conditions.push(format!("({})", tag_conditions.join(" OR ")));
+            }
+        }
+
+        let where_clause = if conditions.is_empty() {
+            String::new()
+        } else {
+            format!(" WHERE {}", conditions.join(" AND "))
+        };
+
+        let limit_clause = limit.map(|l| format!(" LIMIT {}", l)).unwrap_or_default();
+        let sql = format!(
+            "SELECT id, device_id, device_name, webview_url, package_name,
+                    target_title, started_at, ended_at, status, display_name, tags, metadata
+             FROM sessions{}
+             ORDER BY started_at DESC{}",
+            where_clause, limit_clause
+        );
+
+        let mut stmt = conn.prepare(&sql)?;
+
+        // Build dynamic params
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        if let Some(q) = query {
+            params_vec.push(Box::new(format!("%{}%", q)));
+        }
+        if let Some(d) = device_id {
+            params_vec.push(Box::new(d.to_string()));
+        }
+        if let Some(s) = status {
+            params_vec.push(Box::new(s.to_string()));
+        }
+        if let Some(tag_list) = tags {
+            for tag in tag_list {
+                params_vec.push(Box::new(format!("%\"{}\"", tag)));
+            }
+        }
+
+        let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+
+        let rows = stmt.query_map(params_refs.as_slice(), |row| {
+            Ok(Self::row_to_session(row).unwrap())
+        })?;
+
+        let sessions: Result<Vec<_>, _> = rows.collect();
+        Ok(sessions?)
+    }
+
     fn row_to_session(row: &rusqlite::Row) -> Result<Session, StorageError> {
         let status_str: String = row.get(8)?;
-        let metadata_json: Option<String> = row.get(9)?;
+        let display_name: Option<String> = row.get(9)?;
+        let tags_json: Option<String> = row.get(10)?;
+        let metadata_json: Option<String> = row.get(11)?;
 
         Ok(Session {
             id: row.get(0)?,
@@ -231,6 +361,10 @@ impl Database {
             started_at: row.get(6)?,
             ended_at: row.get(7)?,
             status: SessionStatus::from_str(&status_str),
+            display_name,
+            tags: tags_json
+                .map(|s| serde_json::from_str(&s))
+                .transpose()?,
             metadata: metadata_json
                 .map(|s| serde_json::from_str(&s))
                 .transpose()?,

@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useMemo } from "react";
+import { useEffect, useCallback, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
   MetricsChart,
@@ -9,11 +9,16 @@ import {
   SessionTabs,
   ExportDialog,
   ImportDialog,
+  QuickConnectPanel,
+  SessionFilters,
 } from "./components";
+import { toast } from "./components/ui/toaster";
 import { formatBytes, formatDuration } from "./utils";
 import {
   createTauRPCProxy,
   type PerformanceMetrics,
+  type Device,
+  type WebView,
 } from "./bindings";
 import type { NetworkEvent } from "./types";
 import {
@@ -22,7 +27,10 @@ import {
   useCdpStore,
   useMetricsStore,
   useSessionStore,
+  useConnectionStore,
   getConnectionStateDisplay,
+  type ConnectionPreset,
+  type RecentConnection,
 } from "./stores";
 
 function App() {
@@ -102,7 +110,14 @@ function App() {
     sessions,
     setSessions,
     removeSession,
+    getFilteredSessions,
   } = useSessionStore();
+
+  // Connection Store
+  const { setAutoConnectStep, addRecentConnection } = useConnectionStore();
+
+  // Local state for Quick Connect panel
+  const [quickConnectOpen, setQuickConnectOpen] = useState(false);
 
   const refreshDevices = useCallback(async () => {
     setLoading(true);
@@ -173,6 +188,90 @@ function App() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
+  };
+
+  // Auto-connect: Forward port -> Load targets -> Connect to first target
+  const autoConnect = async (device: Device, webview: WebView) => {
+    try {
+      // Step 1: Forward port (or reuse existing)
+      setAutoConnectStep("forwarding_port");
+      const existingPf = getPortForward(webview.socket_name);
+      let port: number;
+
+      if (existingPf) {
+        port = existingPf.localPort;
+      } else {
+        port = nextPort;
+        await taurpc.api.start_port_forward(device.id, webview.socket_name, port);
+        addPortForward({
+          deviceId: device.id,
+          socketName: webview.socket_name,
+          localPort: port,
+        });
+        incrementPort();
+      }
+
+      // Step 2: Load CDP targets
+      setAutoConnectStep("loading_targets");
+      const targets = await taurpc.api.get_cdp_targets(port);
+      setCdpTargets(targets);
+      setActivePort(port);
+
+      if (targets.length === 0) {
+        throw new Error("No CDP targets available");
+      }
+
+      // Step 3: Connect to first target
+      setAutoConnectStep("connecting_cdp");
+      const target = targets[0];
+      if (!target.webSocketDebuggerUrl) {
+        throw new Error("No WebSocket URL available");
+      }
+
+      setConnectionState("Connecting");
+      await taurpc.api.connect_cdp(target.webSocketDebuggerUrl);
+      setConnectionState("Connected");
+      setSelectedTarget(target);
+
+      // Save to recent connections
+      addRecentConnection({
+        deviceId: device.id,
+        deviceName: device.name,
+        socketName: webview.socket_name,
+        packageName: webview.package_name,
+        targetTitle: target.title,
+        targetUrl: target.url,
+        targetId: target.id,
+      });
+
+      setAutoConnectStep("connected");
+      toast.success("Connected", { description: target.title || webview.package_name || "WebView" });
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      setAutoConnectStep("error", errorMsg);
+      toast.error("Connection failed", { description: errorMsg });
+    }
+  };
+
+  // Handle Quick Connect selection
+  const handleQuickConnect = async (item: ConnectionPreset | RecentConnection) => {
+    setQuickConnectOpen(false);
+
+    // Find the device
+    const device = devices.find((d) => d.id === item.deviceId);
+    if (!device) {
+      toast.error("Device not found", { description: "The device is not connected" });
+      return;
+    }
+
+    // Create a minimal WebView object
+    const webview: WebView = {
+      socket_name: item.socketName,
+      package_name: item.packageName,
+      pid: 0,
+    };
+
+    await autoConnect(device, webview);
   };
 
   const loadCdpTargets = async (port: number) => {
@@ -321,22 +420,43 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-900 text-white">
-      {/* Header */}
-      <header className="border-b border-gray-700 px-6 py-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold">AWPA</h1>
-          <p className="text-sm text-gray-400">Android WebView Performance Analyzer</p>
-        </div>
-        <div className="flex items-center gap-4">
+      {/* Header - integrated with macOS titlebar */}
+      <header className="border-b border-gray-700 pl-20 pr-6 pt-4 pb-3 flex items-center justify-between titlebar-drag-region">
+        <div className="flex items-center gap-3">
+          <h1 className="text-lg font-bold" title="Android WebView Performance Analyzer">AWPA</h1>
           {currentSession && (
-            <div className="flex items-center gap-2 text-sm">
+            <div className="flex items-center gap-1.5 text-sm">
               <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
-              <span className="text-gray-300">Recording</span>
+              <span className="text-gray-300">Rec</span>
             </div>
           )}
+        </div>
+        <div className="flex items-center gap-3 titlebar-no-drag">
+          {/* Quick Connect dropdown */}
+          <div className="relative">
+            <button
+              onClick={() => setQuickConnectOpen(!quickConnectOpen)}
+              className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 rounded text-sm flex items-center gap-1.5"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+              Quick
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            {quickConnectOpen && (
+              <QuickConnectPanel
+                onConnect={handleQuickConnect}
+                onClose={() => setQuickConnectOpen(false)}
+                availableDeviceIds={devices.map((d) => d.id)}
+              />
+            )}
+          </div>
           <button
             onClick={() => setShowImport(true)}
-            className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm"
+            className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-sm"
           >
             Import
           </button>
@@ -345,7 +465,7 @@ function App() {
               toggleSessions();
               if (!showSessions) loadSessions();
             }}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-sm"
+            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded text-sm"
           >
             Sessions ({sessions.length})
           </button>
@@ -372,10 +492,23 @@ function App() {
                 Close
               </button>
             </div>
+
+            {/* Session Filters */}
+            {sessions.length > 0 && (
+              <div className="mb-4">
+                <SessionFilters />
+              </div>
+            )}
+
             {sessions.length === 0 ? (
               <div className="bg-gray-800 rounded p-8 text-center">
                 <p className="text-gray-400">No saved sessions</p>
                 <p className="text-sm text-gray-500 mt-2">Start a recording session to capture metrics</p>
+              </div>
+            ) : getFilteredSessions().length === 0 ? (
+              <div className="bg-gray-800 rounded p-8 text-center">
+                <p className="text-gray-400">No sessions match the filters</p>
+                <p className="text-sm text-gray-500 mt-2">Try adjusting your search or filter criteria</p>
               </div>
             ) : (
               <div className="bg-gray-800 rounded overflow-hidden">
@@ -391,7 +524,7 @@ function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {sessions.map((session) => (
+                    {getFilteredSessions().map((session) => (
                       <tr key={session.id} className="border-t border-gray-700 hover:bg-gray-700/50">
                         <td className="p-3">
                           <button
@@ -399,11 +532,26 @@ function App() {
                             className="text-left hover:text-blue-400"
                           >
                             <p className="font-medium truncate max-w-xs">
-                              {session.target_title || "Untitled"}
+                              {session.display_name || session.target_title || "Untitled"}
                             </p>
                             <p className="text-xs text-gray-400 truncate max-w-xs">
                               {session.webview_url}
                             </p>
+                            {session.tags && session.tags.length > 0 && (
+                              <div className="flex gap-1 mt-1">
+                                {session.tags.slice(0, 3).map((tag) => (
+                                  <span
+                                    key={tag}
+                                    className="px-1.5 py-0.5 bg-gray-700 rounded text-xs text-gray-400"
+                                  >
+                                    {tag}
+                                  </span>
+                                ))}
+                                {session.tags.length > 3 && (
+                                  <span className="text-xs text-gray-500">+{session.tags.length - 3}</span>
+                                )}
+                              </div>
+                            )}
                           </button>
                         </td>
                         <td className="p-3 text-gray-400">
@@ -767,8 +915,8 @@ function App() {
                 {/* Detailed Charts */}
                 {showDetailedCharts && metricsHistory.length > 1 && (
                   <div className="space-y-4">
-                    <MetricsChart data={metricsHistory} height={200} />
-                    <DomNodesChart data={metricsHistory} height={150} />
+                    <MetricsChart data={metricsHistory} height={200} syncId="metrics" />
+                    <DomNodesChart data={metricsHistory} height={150} syncId="metrics" />
                   </div>
                 )}
 
