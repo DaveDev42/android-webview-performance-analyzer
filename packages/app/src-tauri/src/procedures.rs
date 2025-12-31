@@ -408,6 +408,15 @@ impl Api for ApiImpl {
         session_id: String,
     ) -> Result<(), String> {
         let state = window.state::<ManagedState>();
+
+        // Clear current session if it matches the deleted one
+        {
+            let mut current = state.current_session_id.write().await;
+            if current.as_ref() == Some(&session_id) {
+                *current = None;
+            }
+        }
+
         state
             .database
             .delete_session(&session_id)

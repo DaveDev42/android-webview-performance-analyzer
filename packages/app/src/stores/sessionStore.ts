@@ -1,6 +1,17 @@
 import { create } from "zustand";
 import type { Session } from "../bindings";
 
+// Utility to extract origin from URL
+export const getUrlOrigin = (url: string | null | undefined): string => {
+  if (!url) return "unknown";
+  try {
+    const parsed = new URL(url);
+    return parsed.origin;
+  } catch {
+    return url;
+  }
+};
+
 export interface SessionFilters {
   searchQuery: string;
   deviceId: string | null;
@@ -49,6 +60,25 @@ interface SessionState {
 
   // Available devices (extracted from all sessions)
   getAllDevices: () => { id: string; name: string | null }[];
+
+  // === NEW: Session organization for tree view ===
+  // Get sessions for a specific WebView (by device + URL origin)
+  getSessionsByWebView: (deviceId: string, webviewUrl: string | null) => Session[];
+
+  // Get all sessions for a device
+  getSessionsByDevice: (deviceId: string) => Session[];
+
+  // Get all unique URL origins for a device
+  getWebViewUrlsForDevice: (deviceId: string) => string[];
+
+  // Check if a session is imported (device_id starts with "imported")
+  isImportedSession: (session: Session) => boolean;
+
+  // Get only imported sessions
+  getImportedSessions: () => Session[];
+
+  // Get non-imported sessions
+  getRegularSessions: () => Session[];
 }
 
 export const useSessionStore = create<SessionState>((set, get) => ({
@@ -159,5 +189,56 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       }
     });
     return Array.from(deviceMap.entries()).map(([id, name]) => ({ id, name }));
+  },
+
+  // === NEW: Session organization for tree view ===
+
+  // Get sessions for a specific WebView (by device + URL origin)
+  getSessionsByWebView: (deviceId, webviewUrl) => {
+    const { sessions } = get();
+    const targetOrigin = getUrlOrigin(webviewUrl);
+    return sessions.filter(
+      (s) =>
+        s.device_id === deviceId &&
+        getUrlOrigin(s.webview_url) === targetOrigin &&
+        !s.device_id.startsWith("imported")
+    );
+  },
+
+  // Get all sessions for a device
+  getSessionsByDevice: (deviceId) => {
+    const { sessions } = get();
+    return sessions.filter(
+      (s) => s.device_id === deviceId && !s.device_id.startsWith("imported")
+    );
+  },
+
+  // Get all unique URL origins for a device
+  getWebViewUrlsForDevice: (deviceId) => {
+    const { sessions } = get();
+    const origins = new Set<string>();
+    sessions
+      .filter((s) => s.device_id === deviceId && !s.device_id.startsWith("imported"))
+      .forEach((s) => {
+        origins.add(getUrlOrigin(s.webview_url));
+      });
+    return Array.from(origins);
+  },
+
+  // Check if a session is imported
+  isImportedSession: (session) => {
+    return session.device_id.startsWith("imported");
+  },
+
+  // Get only imported sessions
+  getImportedSessions: () => {
+    const { sessions } = get();
+    return sessions.filter((s) => s.device_id.startsWith("imported"));
+  },
+
+  // Get non-imported sessions
+  getRegularSessions: () => {
+    const { sessions } = get();
+    return sessions.filter((s) => !s.device_id.startsWith("imported"));
   },
 }));
