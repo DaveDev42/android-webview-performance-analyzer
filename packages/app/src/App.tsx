@@ -17,6 +17,7 @@ import {
   type Session,
 } from "./bindings";
 import type { NetworkEvent } from "./types";
+import type { TrimMemoryLevel } from "./types/deviceProfiles";
 import {
   useUiStore,
   useDeviceStore,
@@ -324,6 +325,20 @@ function App() {
     }
   }, [connectionState, taurpc, setMetrics]);
 
+  // ============ Memory Simulation Handlers ============
+
+  const handleSendTrimMemory = async (
+    deviceId: string,
+    packageName: string,
+    level: TrimMemoryLevel
+  ): Promise<void> => {
+    await taurpc.api.send_trim_memory(deviceId, packageName, level);
+  };
+
+  const handleGetMeminfo = async (deviceId: string) => {
+    return await taurpc.api.get_device_meminfo(deviceId);
+  };
+
   // ============ Event Handlers for MainTab ============
 
   const handleSelectDevice = (device: Device) => {
@@ -428,6 +443,8 @@ function App() {
               onStartRecording={startSession}
               onStopRecording={endSession}
               onShowImport={() => setShowImport(true)}
+              onSendTrimMemory={handleSendTrimMemory}
+              onGetMeminfo={handleGetMeminfo}
             />
           }
           renderSessionTab={(sessionId) => {

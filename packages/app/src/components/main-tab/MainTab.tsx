@@ -1,6 +1,15 @@
 import { TreePanel } from "./TreePanel";
 import { DetailPanel } from "./DetailPanel";
 import type { Device, WebView, CdpTarget, Session } from "../../bindings";
+import type { TrimMemoryLevel } from "@/types/deviceProfiles";
+
+interface MemoryInfo {
+  total_kb: number;
+  available_kb: number;
+  free_kb: number;
+  buffers_kb: number;
+  cached_kb: number;
+}
 
 interface MainTabProps {
   // Device actions
@@ -25,6 +34,10 @@ interface MainTabProps {
 
   // Import
   onShowImport: () => void;
+
+  // Memory Simulation
+  onSendTrimMemory?: (deviceId: string, packageName: string, level: TrimMemoryLevel) => Promise<void>;
+  onGetMeminfo?: (deviceId: string) => Promise<MemoryInfo>;
 }
 
 export function MainTab({
@@ -41,6 +54,8 @@ export function MainTab({
   onStartRecording,
   onStopRecording,
   onShowImport,
+  onSendTrimMemory,
+  onGetMeminfo,
 }: MainTabProps) {
   return (
     <div className="flex h-full">
@@ -66,6 +81,8 @@ export function MainTab({
           onStopRecording={onStopRecording}
           onLoadTargets={onLoadTargets}
           onForwardPort={onForwardPort}
+          onSendTrimMemory={onSendTrimMemory}
+          onGetMeminfo={onGetMeminfo}
         />
       </div>
     </div>

@@ -1,4 +1,4 @@
-use crate::adb::{self, Device, WebView};
+use crate::adb::{self, Device, MemoryInfo, TrimMemoryLevel, WebView};
 use crate::cdp::{CdpClient, CdpTarget, ConnectionState, MetricsCollector, PerformanceMetrics};
 use crate::storage::{Database, MetricType, Session, StoredMetric, StoredNetworkRequest};
 use serde::{Deserialize, Serialize};
@@ -70,6 +70,20 @@ pub trait Api {
         window: Window<R>,
         device_id: String,
     ) -> Result<(), String>;
+
+    // ============ Memory Simulation Commands ============
+
+    async fn send_trim_memory<R: Runtime>(
+        window: Window<R>,
+        device_id: String,
+        package_name: String,
+        level: TrimMemoryLevel,
+    ) -> Result<(), String>;
+
+    async fn get_device_meminfo<R: Runtime>(
+        window: Window<R>,
+        device_id: String,
+    ) -> Result<MemoryInfo, String>;
 
     // ============ CDP Commands ============
 
@@ -215,6 +229,30 @@ impl Api for ApiImpl {
         device_id: String,
     ) -> Result<(), String> {
         adb::remove_all_forwards(window.app_handle(), &device_id)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    // ============ Memory Simulation Commands ============
+
+    async fn send_trim_memory<R: Runtime>(
+        self,
+        window: Window<R>,
+        device_id: String,
+        package_name: String,
+        level: TrimMemoryLevel,
+    ) -> Result<(), String> {
+        adb::send_trim_memory(window.app_handle(), &device_id, &package_name, level)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    async fn get_device_meminfo<R: Runtime>(
+        self,
+        window: Window<R>,
+        device_id: String,
+    ) -> Result<MemoryInfo, String> {
+        adb::get_meminfo(window.app_handle(), &device_id)
             .await
             .map_err(|e| e.to_string())
     }

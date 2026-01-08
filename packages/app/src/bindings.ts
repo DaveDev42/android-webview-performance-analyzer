@@ -18,6 +18,31 @@ export type CreateSessionParams = { device_id: string; device_name: string | nul
 
 export type Device = { id: string; name: string; status: string }
 
+/**
+ * System memory information from /proc/meminfo
+ */
+export type MemoryInfo = { 
+/**
+ * Total RAM in KB
+ */
+total_kb: number; 
+/**
+ * Available RAM in KB
+ */
+available_kb: number; 
+/**
+ * Free RAM in KB
+ */
+free_kb: number; 
+/**
+ * Buffers in KB
+ */
+buffers_kb: number; 
+/**
+ * Cached in KB
+ */
+cached_kb: number }
+
 export type MetricType = "performance" | "memory" | "network" | "webvitals"
 
 /**
@@ -43,9 +68,34 @@ export type StoredMetric = { id?: number | null; session_id: string; timestamp: 
 
 export type StoredNetworkRequest = { id: string; session_id: string; url: string; method: string | null; status_code: number | null; request_time: number; response_time: number | null; duration_ms: number | null; size_bytes: number | null; headers: Partial<{ [key in string]: string }> | null }
 
+/**
+ * Memory trim levels for Android's onTrimMemory callback
+ */
+export type TrimMemoryLevel = 
+/**
+ * App is running and not killable - moderate trim
+ */
+"RunningModerate" | 
+/**
+ * App is running but system is low on memory
+ */
+"RunningLow" | 
+/**
+ * App is running but system is critically low on memory
+ */
+"RunningCritical" | 
+/**
+ * App is in background - moderate trim
+ */
+"Moderate" | 
+/**
+ * App should release as much memory as possible
+ */
+"Complete"
+
 export type WebView = { socket_name: string; pid: number; package_name: string | null }
 
-const ARGS_MAP = { 'api':'{"connect_cdp":["ws_url"],"create_session":["params"],"delete_session":["session_id"],"disconnect_cdp":[],"end_session":["session_id"],"get_cdp_state":[],"get_cdp_targets":["port"],"get_devices":[],"get_performance_metrics":[],"get_session":["session_id"],"get_session_metrics":["session_id","metric_type","start_time","end_time","limit"],"get_session_network_requests":["session_id","limit"],"get_webviews":["device_id"],"list_sessions":["limit"],"search_sessions":["query","device_id","status","tags","limit"],"start_metrics_collection":["poll_interval_ms"],"start_port_forward":["device_id","socket_name","local_port"],"stop_all_port_forwards":["device_id"],"stop_metrics_collection":[],"stop_port_forward":["device_id","local_port"],"update_session_name":["session_id","display_name"],"update_session_tags":["session_id","tags"]}' }
+const ARGS_MAP = { 'api':'{"connect_cdp":["ws_url"],"create_session":["params"],"delete_session":["session_id"],"disconnect_cdp":[],"end_session":["session_id"],"get_cdp_state":[],"get_cdp_targets":["port"],"get_device_meminfo":["device_id"],"get_devices":[],"get_performance_metrics":[],"get_session":["session_id"],"get_session_metrics":["session_id","metric_type","start_time","end_time","limit"],"get_session_network_requests":["session_id","limit"],"get_webviews":["device_id"],"list_sessions":["limit"],"search_sessions":["query","device_id","status","tags","limit"],"send_trim_memory":["device_id","package_name","level"],"start_metrics_collection":["poll_interval_ms"],"start_port_forward":["device_id","socket_name","local_port"],"stop_all_port_forwards":["device_id"],"stop_metrics_collection":[],"stop_port_forward":["device_id","local_port"],"update_session_name":["session_id","display_name"],"update_session_tags":["session_id","tags"]}' }
 export type Router = { "api": {connect_cdp: (wsUrl: string) => Promise<null>, 
 create_session: (params: CreateSessionParams) => Promise<Session>, 
 delete_session: (sessionId: string) => Promise<null>, 
@@ -53,6 +103,7 @@ disconnect_cdp: () => Promise<null>,
 end_session: (sessionId: string | null) => Promise<null>, 
 get_cdp_state: () => Promise<ConnectionState>, 
 get_cdp_targets: (port: number) => Promise<CdpTarget[]>, 
+get_device_meminfo: (deviceId: string) => Promise<MemoryInfo>, 
 get_devices: () => Promise<Device[]>, 
 get_performance_metrics: () => Promise<PerformanceMetrics>, 
 get_session: (sessionId: string) => Promise<Session | null>, 
@@ -61,6 +112,7 @@ get_session_network_requests: (sessionId: string, limit: number | null) => Promi
 get_webviews: (deviceId: string) => Promise<WebView[]>, 
 list_sessions: (limit: number | null) => Promise<Session[]>, 
 search_sessions: (query: string | null, deviceId: string | null, status: string | null, tags: string[] | null, limit: number | null) => Promise<Session[]>, 
+send_trim_memory: (deviceId: string, packageName: string, level: TrimMemoryLevel) => Promise<null>, 
 start_metrics_collection: (pollIntervalMs: number | null) => Promise<null>, 
 start_port_forward: (deviceId: string, socketName: string, localPort: number) => Promise<PortForwardResult>, 
 stop_all_port_forwards: (deviceId: string) => Promise<null>, 

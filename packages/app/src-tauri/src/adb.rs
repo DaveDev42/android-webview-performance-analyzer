@@ -241,3 +241,120 @@ pub async fn remove_all_forwards<R: Runtime>(
 
     Ok(())
 }
+
+/// Memory trim levels for Android's onTrimMemory callback
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub enum TrimMemoryLevel {
+    /// App is running and not killable - moderate trim
+    RunningModerate,
+    /// App is running but system is low on memory
+    RunningLow,
+    /// App is running but system is critically low on memory
+    RunningCritical,
+    /// App is in background - moderate trim
+    Moderate,
+    /// App should release as much memory as possible
+    Complete,
+}
+
+impl TrimMemoryLevel {
+    fn as_str(&self) -> &'static str {
+        match self {
+            TrimMemoryLevel::RunningModerate => "RUNNING_MODERATE",
+            TrimMemoryLevel::RunningLow => "RUNNING_LOW",
+            TrimMemoryLevel::RunningCritical => "RUNNING_CRITICAL",
+            TrimMemoryLevel::Moderate => "MODERATE",
+            TrimMemoryLevel::Complete => "COMPLETE",
+        }
+    }
+}
+
+/// System memory information from /proc/meminfo
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct MemoryInfo {
+    /// Total RAM in KB
+    pub total_kb: u64,
+    /// Available RAM in KB
+    pub available_kb: u64,
+    /// Free RAM in KB
+    pub free_kb: u64,
+    /// Buffers in KB
+    pub buffers_kb: u64,
+    /// Cached in KB
+    pub cached_kb: u64,
+}
+
+/// Send memory trim signal to an app
+/// Uses: adb shell am send-trim-memory <package> <level>
+pub async fn send_trim_memory<R: Runtime>(
+    app: &AppHandle<R>,
+    device_id: &str,
+    package_name: &str,
+    level: TrimMemoryLevel,
+) -> Result<(), AdbError> {
+    let output = run_adb_command(
+        app,
+        &[
+            "-s",
+            device_id,
+            "shell",
+            "am",
+            "send-trim-memory",
+            package_name,
+            level.as_str(),
+        ],
+    )
+    .await?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        return Err(AdbError::CommandFailed(format!("{}{}", stderr, stdout)));
+    }
+
+    Ok(())
+}
+
+/// Get system memory information from /proc/meminfo
+pub async fn get_meminfo<R: Runtime>(
+    app: &AppHandle<R>,
+    device_id: &str,
+) -> Result<MemoryInfo, AdbError> {
+    let output = run_adb_command(app, &["-s", device_id, "shell", "cat", "/proc/meminfo"]).await?;
+
+    if !output.status.success() {
+        return Err(AdbError::CommandFailed(
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        ));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut total_kb = 0u64;
+    let mut available_kb = 0u64;
+    let mut free_kb = 0u64;
+    let mut buffers_kb = 0u64;
+    let mut cached_kb = 0u64;
+
+    for line in stdout.lines() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 2 {
+            let value: u64 = parts[1].parse().unwrap_or(0);
+            match parts[0] {
+                "MemTotal:" => total_kb = value,
+                "MemAvailable:" => available_kb = value,
+                "MemFree:" => free_kb = value,
+                "Buffers:" => buffers_kb = value,
+                "Cached:" => cached_kb = value,
+                _ => {}
+            }
+        }
+    }
+
+    Ok(MemoryInfo {
+        total_kb,
+        available_kb,
+        free_kb,
+        buffers_kb,
+        cached_kb,
+    })
+}

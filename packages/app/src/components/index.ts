@@ -6,6 +6,7 @@ export { AutoConnectProgress } from "./AutoConnectProgress";
 export { QuickConnectPanel } from "./QuickConnectPanel";
 export { SessionFilters } from "./SessionFilters";
 export { TimeRangeSelector } from "./TimeRangeSelector";
+export { MemorySimulationPanel } from "./MemorySimulationPanel";
 
 // Layout components
 export { TabContainer } from "./layout";

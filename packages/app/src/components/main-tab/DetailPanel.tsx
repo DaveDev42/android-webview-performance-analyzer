@@ -6,6 +6,16 @@ import { Badge } from "../ui/badge";
 import { cn } from "@/lib/utils";
 import { formatBytes } from "../../utils";
 import { MiniChart } from "../MetricsChart";
+import { MemorySimulationPanel } from "../MemorySimulationPanel";
+import type { TrimMemoryLevel } from "@/types/deviceProfiles";
+
+interface MemoryInfo {
+  total_kb: number;
+  available_kb: number;
+  free_kb: number;
+  buffers_kb: number;
+  cached_kb: number;
+}
 
 interface DetailPanelProps {
   onConnect: (target: CdpTarget) => void;
@@ -14,6 +24,8 @@ interface DetailPanelProps {
   onStopRecording: () => void;
   onLoadTargets: (port: number) => void;
   onForwardPort: (webview: WebView) => void;
+  onSendTrimMemory?: (deviceId: string, packageName: string, level: TrimMemoryLevel) => Promise<void>;
+  onGetMeminfo?: (deviceId: string) => Promise<MemoryInfo>;
 }
 
 // Helper to get connection state display
@@ -40,6 +52,8 @@ export function DetailPanel({
   onStopRecording,
   onLoadTargets,
   onForwardPort,
+  onSendTrimMemory,
+  onGetMeminfo,
 }: DetailPanelProps) {
   const { selectedTreeItem } = useUiStore();
   const { selectedDevice, webviews, getPortForward } = useDeviceStore();
@@ -309,6 +323,16 @@ export function DetailPanel({
                 </div>
               </div>
             </div>
+          )}
+
+          {/* Memory Simulation (when connected and recording) */}
+          {isConnected && webview?.package_name && selectedDevice && onSendTrimMemory && onGetMeminfo && (
+            <MemorySimulationPanel
+              deviceId={selectedDevice.id}
+              packageName={webview.package_name}
+              onSendTrimMemory={onSendTrimMemory}
+              onGetMeminfo={onGetMeminfo}
+            />
           )}
         </div>
       </div>
