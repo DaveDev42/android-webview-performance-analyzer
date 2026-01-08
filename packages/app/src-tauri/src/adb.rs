@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri::{AppHandle, Runtime};
-use tauri_plugin_shell::ShellExt;
+use tauri_plugin_shell::{process::Output, ShellExt};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -10,6 +10,27 @@ pub enum AdbError {
     ExecutionFailed(String),
     #[error("ADB command failed with output: {0}")]
     CommandFailed(String),
+}
+
+/// Execute an ADB command, preferring system ADB over bundled sidecar.
+/// Tries system ADB first to reuse existing ADB server, falls back to bundled sidecar.
+async fn run_adb_command<R: Runtime>(
+    app: &AppHandle<R>,
+    args: &[&str],
+) -> Result<Output, AdbError> {
+    // Try system ADB first (reuses existing ADB server if running)
+    if let Ok(output) = app.shell().command("system-adb").args(args).output().await {
+        return Ok(output);
+    }
+
+    // Fall back to bundled sidecar
+    app.shell()
+        .sidecar("adb")
+        .map_err(|e| AdbError::ExecutionFailed(e.to_string()))?
+        .args(args)
+        .output()
+        .await
+        .map_err(|e| AdbError::ExecutionFailed(e.to_string()))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -27,14 +48,7 @@ pub struct WebView {
 }
 
 pub async fn list_devices<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<Device>, AdbError> {
-    let output = app
-        .shell()
-        .sidecar("adb")
-        .map_err(|e| AdbError::ExecutionFailed(e.to_string()))?
-        .args(["devices", "-l"])
-        .output()
-        .await
-        .map_err(|e| AdbError::ExecutionFailed(e.to_string()))?;
+    let output = run_adb_command(app, &["devices", "-l"]).await?;
 
     if !output.status.success() {
         return Err(AdbError::CommandFailed(
@@ -74,14 +88,7 @@ pub async fn list_webviews<R: Runtime>(
     app: &AppHandle<R>,
     device_id: &str,
 ) -> Result<Vec<WebView>, AdbError> {
-    let output = app
-        .shell()
-        .sidecar("adb")
-        .map_err(|e| AdbError::ExecutionFailed(e.to_string()))?
-        .args(["-s", device_id, "shell", "cat", "/proc/net/unix"])
-        .output()
-        .await
-        .map_err(|e| AdbError::ExecutionFailed(e.to_string()))?;
+    let output = run_adb_command(app, &["-s", device_id, "shell", "cat", "/proc/net/unix"]).await?;
 
     if !output.status.success() {
         return Err(AdbError::CommandFailed(
@@ -149,19 +156,8 @@ async fn get_package_name<R: Runtime>(
     device_id: &str,
     pid: u32,
 ) -> Result<String, AdbError> {
-    let output = app
-        .shell()
-        .sidecar("adb")
-        .map_err(|e| AdbError::ExecutionFailed(e.to_string()))?
-        .args([
-            "-s",
-            device_id,
-            "shell",
-            &format!("cat /proc/{}/cmdline", pid),
-        ])
-        .output()
-        .await
-        .map_err(|e| AdbError::ExecutionFailed(e.to_string()))?;
+    let cmdline_path = format!("cat /proc/{}/cmdline", pid);
+    let output = run_adb_command(app, &["-s", device_id, "shell", &cmdline_path]).await?;
 
     if output.status.success() {
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -180,14 +176,7 @@ async fn get_pid_for_package<R: Runtime>(
     device_id: &str,
     package: &str,
 ) -> Result<u32, AdbError> {
-    let output = app
-        .shell()
-        .sidecar("adb")
-        .map_err(|e| AdbError::ExecutionFailed(e.to_string()))?
-        .args(["-s", device_id, "shell", "pidof", package])
-        .output()
-        .await
-        .map_err(|e| AdbError::ExecutionFailed(e.to_string()))?;
+    let output = run_adb_command(app, &["-s", device_id, "shell", "pidof", package]).await?;
 
     if output.status.success() {
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -208,20 +197,9 @@ pub async fn forward_port<R: Runtime>(
     local_port: u16,
     socket_name: &str,
 ) -> Result<(), AdbError> {
-    let output = app
-        .shell()
-        .sidecar("adb")
-        .map_err(|e| AdbError::ExecutionFailed(e.to_string()))?
-        .args([
-            "-s",
-            device_id,
-            "forward",
-            &format!("tcp:{}", local_port),
-            &format!("localabstract:{}", socket_name),
-        ])
-        .output()
-        .await
-        .map_err(|e| AdbError::ExecutionFailed(e.to_string()))?;
+    let tcp_arg = format!("tcp:{}", local_port);
+    let socket_arg = format!("localabstract:{}", socket_name);
+    let output = run_adb_command(app, &["-s", device_id, "forward", &tcp_arg, &socket_arg]).await?;
 
     if !output.status.success() {
         return Err(AdbError::CommandFailed(
@@ -237,20 +215,8 @@ pub async fn remove_forward<R: Runtime>(
     device_id: &str,
     local_port: u16,
 ) -> Result<(), AdbError> {
-    let output = app
-        .shell()
-        .sidecar("adb")
-        .map_err(|e| AdbError::ExecutionFailed(e.to_string()))?
-        .args([
-            "-s",
-            device_id,
-            "forward",
-            "--remove",
-            &format!("tcp:{}", local_port),
-        ])
-        .output()
-        .await
-        .map_err(|e| AdbError::ExecutionFailed(e.to_string()))?;
+    let tcp_arg = format!("tcp:{}", local_port);
+    let output = run_adb_command(app, &["-s", device_id, "forward", "--remove", &tcp_arg]).await?;
 
     if !output.status.success() {
         return Err(AdbError::CommandFailed(
@@ -265,14 +231,7 @@ pub async fn remove_all_forwards<R: Runtime>(
     app: &AppHandle<R>,
     device_id: &str,
 ) -> Result<(), AdbError> {
-    let output = app
-        .shell()
-        .sidecar("adb")
-        .map_err(|e| AdbError::ExecutionFailed(e.to_string()))?
-        .args(["-s", device_id, "forward", "--remove-all"])
-        .output()
-        .await
-        .map_err(|e| AdbError::ExecutionFailed(e.to_string()))?;
+    let output = run_adb_command(app, &["-s", device_id, "forward", "--remove-all"]).await?;
 
     if !output.status.success() {
         return Err(AdbError::CommandFailed(

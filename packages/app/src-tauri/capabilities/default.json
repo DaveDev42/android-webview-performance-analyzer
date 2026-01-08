@@ -16,6 +16,11 @@
           "cmd": "binaries/adb",
           "args": true,
           "sidecar": true
+        },
+        {
+          "name": "system-adb",
+          "cmd": "adb",
+          "args": true
         }
       ]
     },
@@ -27,6 +32,11 @@
           "cmd": "binaries/adb",
           "args": true,
           "sidecar": true
+        },
+        {
+          "name": "system-adb",
+          "cmd": "adb",
+          "args": true
         }
       ]
     }
